@@ -1,0 +1,129 @@
+{
+  "adjudication_flow": [
+    {
+      "step": 1,
+      "name": "basic_eligibility",
+      "checks": [
+        "policy_active_on_treatment_date",
+        "waiting_period_satisfied",
+        "claimant_is_covered_member"
+      ]
+    },
+    {
+      "step": 2,
+      "name": "document_validation",
+      "checks": [
+        "documents_legible",
+        "all_required_fields_present",
+        "doctor_registration_valid_format",
+        "bills_have_headers_and_stamps",
+        "treatment_dates_consistent_across_documents",
+        "patient_name_matches_policy"
+      ],
+      "doctor_registration_format": "[StateCode]/[Number]/[Year]"
+    },
+    {
+      "step": 3,
+      "name": "coverage_verification",
+      "checks": [
+        "service_in_covered_list",
+        "service_not_in_exclusions",
+        "pre_authorization_obtained_if_required"
+      ]
+    },
+    {
+      "step": 4,
+      "name": "limit_validation",
+      "checks": [
+        "annual_ytd_plus_current_within_annual_limit",
+        "category_sub_limit_not_exceeded",
+        "per_claim_limit_not_exceeded",
+        "apply_copay_deduction"
+      ]
+    },
+    {
+      "step": 5,
+      "name": "medical_necessity",
+      "checks": [
+        "diagnosis_justifies_treatment",
+        "prescription_aligns_with_diagnosis",
+        "test_results_support_diagnosis",
+        "treatment_follows_standard_protocols"
+      ]
+    }
+  ],
+  "approval_conditions": [
+    "policy_active_and_waiting_period_satisfied",
+    "all_required_documents_submitted_and_valid",
+    "treatment_covered_under_policy",
+    "claim_amount_within_limits_after_copay",
+    "medical_necessity_established",
+    "no_fraud_indicators_detected"
+  ],
+  "rejection_codes": {
+    "eligibility": {
+      "POLICY_INACTIVE": "Policy not active on treatment date",
+      "WAITING_PERIOD": "Treatment during waiting period",
+      "MEMBER_NOT_COVERED": "Claimant not found in policy records"
+    },
+    "documentation": {
+      "MISSING_DOCUMENTS": "Required documents not submitted",
+      "ILLEGIBLE_DOCUMENTS": "Documents not readable",
+      "INVALID_PRESCRIPTION": "Prescription missing or invalid",
+      "DOCTOR_REG_INVALID": "Doctor registration number invalid or missing",
+      "DATE_MISMATCH": "Document dates do not match",
+      "PATIENT_MISMATCH": "Patient details do not match policy records"
+    },
+    "coverage": {
+      "SERVICE_NOT_COVERED": "Treatment or service not covered under policy",
+      "EXCLUDED_CONDITION": "Condition is in the exclusions list",
+      "PRE_AUTH_MISSING": "Pre-authorization required but not obtained"
+    },
+    "limits": {
+      "ANNUAL_LIMIT_EXCEEDED": "Annual limit exhausted",
+      "SUB_LIMIT_EXCEEDED": "Category sub-limit exceeded",
+      "PER_CLAIM_EXCEEDED": "Single claim limit exceeded"
+    },
+    "medical": {
+      "NOT_MEDICALLY_NECESSARY": "Treatment not justified by diagnosis",
+      "EXPERIMENTAL_TREATMENT": "Experimental or unproven treatment",
+      "COSMETIC_PROCEDURE": "Cosmetic or aesthetic procedure"
+    },
+    "process": {
+      "LATE_SUBMISSION": "Submitted after 30-day deadline",
+      "DUPLICATE_CLAIM": "Same treatment already claimed",
+      "BELOW_MIN_AMOUNT": "Claim below minimum amount of INR 500"
+    }
+  },
+  "partial_approval_triggers": [
+    "part_of_treatment_covered_part_not",
+    "claim_exceeds_limit_approve_up_to_limit",
+    "copayment_applies"
+  ],
+  "manual_review_triggers": [
+    "fraud_indicators_detected",
+    "claim_value_above_25000",
+    "complex_medical_condition",
+    "confidence_below_0.70",
+    "member_appeals_automated_decision"
+  ],
+  "fraud_indicators": [
+    "multiple_claims_same_provider_same_day",
+    "unusually_high_claim_frequency",
+    "bills_with_suspicious_alterations",
+    "diagnosis_inconsistent_with_age_or_gender",
+    "duplicate_bills_across_different_dates",
+    "provider_not_registered_or_blacklisted"
+  ],
+  "network_rules": {
+    "network_provider": "apply_network_discounts_cashless_eligible",
+    "non_network_provider": "full_payment_by_member_standard_reimbursement"
+  },
+  "priority_order": [
+    "reject_suspicious_or_fraudulent_claims",
+    "policy_exclusions_override_everything",
+    "hard_limits_cannot_be_exceeded",
+    "medical_necessity_is_mandatory",
+    "refer_for_manual_review_when_in_doubt"
+  ]
+}

@@ -1,37 +1,59 @@
-export interface Prescription {
+// ── Extraction types (mirroring backend models.py) ───────────────────────────
+
+export interface ExtractedPrescription {
   doctor_name: string;
-  doctor_reg: string;
+  doctor_registration: string;
+  patient_name: string;
+  consultation_date: string;
   diagnosis: string;
-  medicines_prescribed?: string[];
-  treatment?: string;
-  tests_prescribed?: string[];
-  procedures?: string[];
+  medicines_prescribed: string[];
+  tests_advised: string[];
+  procedures: string[];
+  notes: string;
 }
 
-export interface Bill {
-  consultation_fee?: number;
-  medicines?: number;
-  diagnostic_tests?: number;
-  test_names?: string[];
-  [key: string]: unknown;
+export interface ExtractedMedicalBill {
+  hospital_name: string;
+  bill_number: string;
+  bill_date: string;
+  patient_name: string;
+  consultation_fee: number;
+  procedure_charges: number;
+  other_charges: number;
+  total_amount: number;
+  line_items: string[];
+  payment_mode: string;
 }
 
-export interface ClaimDocuments {
-  prescription?: Prescription;
-  bill?: Bill;
+export interface ExtractedDiagnosticReport {
+  lab_name: string;
+  accreditation: string;
+  report_date: string;
+  patient_name: string;
+  tests_performed: string[];
+  abnormal_findings: string[];
+  pathologist: string;
+  summary: string;
 }
 
-export interface ClaimRequest {
-  member_id: string;
-  member_name: string;
-  member_join_date?: string;
-  treatment_date: string;
-  claim_amount: number;
-  hospital?: string;
-  cashless_request?: boolean;
-  previous_claims_same_day?: number;
-  documents: ClaimDocuments;
+export interface ExtractedPharmacyBill {
+  pharmacy_name: string;
+  drug_license: string;
+  bill_date: string;
+  patient_name: string;
+  doctor_name: string;
+  medicines_purchased: string[];
+  total_amount: number;
 }
+
+export interface ExtractionResults {
+  prescription?: ExtractedPrescription;
+  medical_bill?: ExtractedMedicalBill;
+  diagnostic_report?: ExtractedDiagnosticReport;
+  pharmacy_bill?: ExtractedPharmacyBill;
+}
+
+// ── Adjudication decision ─────────────────────────────────────────────────────
 
 export interface AdjudicationDecision {
   claim_id: string;
@@ -44,7 +66,12 @@ export interface AdjudicationDecision {
   reasoning: string;
   cashless_approved?: boolean;
   network_discount?: number;
-  flags?: string[];
   deductions?: Record<string, number>;
   rejected_items?: string[];
+  flags?: string[];
+}
+
+export interface DocumentAdjudicationResponse {
+  extractions: ExtractionResults;
+  decision: AdjudicationDecision;
 }

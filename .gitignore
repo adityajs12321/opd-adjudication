@@ -9,3 +9,6 @@ test_cases.json
 backend/.env
 adjudication_rules.md
 node_modules
+generated_documents
+__pycache__
+.next
