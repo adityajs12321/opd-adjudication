@@ -131,7 +131,7 @@ See `database.py` for the SQL schema and `graph_store.py` for the graph model.
 
 ## Deployment topology
 
-Automated deployment to Vercel and Render through Github Actions.
+Automated deployment to Vercel and Render native Git integration.
 
 | Component | Host |
 |---|---|
