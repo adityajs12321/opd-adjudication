@@ -1,13 +1,11 @@
 import os
-
 from neo4j import GraphDatabase
-
 from models import ExtractionResults
 
 POLICY_ID = "PLUM_OPD_2024"
 
 _driver = None
-_cache: dict = {}   # full graph loaded into memory once after init
+_cache: dict = {}
 
 
 def _get_driver():
@@ -20,7 +18,7 @@ def _get_driver():
     return _driver
 
 
-# ── Graph initialisation ──────────────────────────────────────────────────────
+# Graph initialization
 
 def init_graph(policy_data: dict):
     """Clear and rebuild the policy graph, then warm the in-memory cache."""
@@ -37,7 +35,7 @@ def _build_graph(tx, policy: dict):
     # Wipe previous graph (all nodes carry the PlumPolicyNode marker label)
     tx.run("MATCH (n:PlumPolicyNode) DETACH DELETE n")
 
-    # ── Policy root ───────────────────────────────────────────────────────────
+    # Root policy
     tx.run(
         """
         CREATE (:Policy:PlumPolicyNode {id: $id, name: $name, effective_date: $eff})
@@ -47,7 +45,7 @@ def _build_graph(tx, policy: dict):
         eff=policy["effective_date"],
     )
 
-    # ── Global limits ─────────────────────────────────────────────────────────
+    # Global Limits
     tx.run(
         """
         MATCH (p:Policy {id: $pid})
@@ -64,7 +62,7 @@ def _build_graph(tx, policy: dict):
         family_floater=cov["family_floater_limit"],
     )
 
-    # ── Claim requirements ────────────────────────────────────────────────────
+    # Claim Requirements
     cr = policy["claim_requirements"]
     tx.run(
         """
@@ -80,7 +78,7 @@ def _build_graph(tx, policy: dict):
         min_amount=cr["minimum_claim_amount"],
     )
 
-    # ── Coverage categories ───────────────────────────────────────────────────
+    # Coverage categories
     category_map = {
         "consultation_fees": cov["consultation_fees"],
         "diagnostic_tests": cov["diagnostic_tests"],
@@ -123,7 +121,7 @@ def _build_graph(tx, policy: dict):
                     name=item,
                 )
 
-    # ── Waiting periods ───────────────────────────────────────────────────────
+    # Waiting periods
     wp = policy["waiting_periods"]
     for wp_type, days in [
         ("initial", wp["initial_waiting"]),
@@ -155,7 +153,7 @@ def _build_graph(tx, policy: dict):
             condition=condition,
         )
 
-    # ── Exclusions ────────────────────────────────────────────────────────────
+    # Exclusions
     for excl in policy["exclusions"]:
         tx.run(
             """
@@ -167,7 +165,7 @@ def _build_graph(tx, policy: dict):
             desc=excl,
         )
 
-    # ── Network hospitals ─────────────────────────────────────────────────────
+    # Network Hospitals
     for hospital in policy["network_hospitals"]:
         tx.run(
             """
@@ -180,7 +178,7 @@ def _build_graph(tx, policy: dict):
         )
 
 
-# ── Startup cache load ────────────────────────────────────────────────────────
+# Load cache on startup
 
 def _load_cache() -> dict:
     """Read the full policy graph from Neo4j into a plain Python dict once."""
@@ -248,7 +246,7 @@ def _load_cache() -> dict:
     return cache
 
 
-# ── Per-claim filtering (no Neo4j round-trip) ─────────────────────────────────
+# Per claim filtering
 
 def query_relevant_policy(extractions: ExtractionResults) -> dict:
     """
@@ -260,7 +258,6 @@ def query_relevant_policy(extractions: ExtractionResults) -> dict:
     pharmacy = extractions.pharmacy_bill
     diagnostic = extractions.diagnostic_report
 
-    # ── Determine relevant coverage categories from extracted claim data ─────
     relevant_categories: set[str] = set()
 
     if bill:
@@ -294,13 +291,12 @@ def query_relevant_policy(extractions: ExtractionResults) -> dict:
         if any(kw in context_text for kw in keywords):
             relevant_categories.add(category)
 
-    # Use canonical_conditions (LLM-normalised) for reliable waiting period lookup
+    # Use canonical_conditions for reliable waiting period lookup
     canonical = {c.lower() for c in (rx.canonical_conditions if rx else [])}
     condition_keywords = ["diabetes", "hypertension", "joint_replacement"]
     relevant_conditions = {c for c in condition_keywords if c in canonical}
     hospital_name = (bill.hospital_name or "") if bill else ""
 
-    # ── Filter in-memory cache — zero Neo4j round-trips at claim time ─────────
     result: dict = {}
 
     result["limits"] = _cache.get("limits", {})

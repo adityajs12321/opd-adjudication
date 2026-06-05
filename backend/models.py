@@ -1,16 +1,13 @@
 from pydantic import BaseModel, model_validator
 from typing import Literal, Optional
 
-
-# ── Extraction models (one per document type) ────────────────────────────────
-
 class ExtractedPrescription(BaseModel):
     doctor_name: str = ""
     doctor_registration: str = ""
     patient_name: str = ""
     consultation_date: str = ""
     diagnosis: str = ""
-    canonical_conditions: list[str] = []   # normalised from diagnosis, e.g. ["diabetes"]
+    canonical_conditions: list[str] = []
     medicines_prescribed: list[str] = []
     tests_advised: list[str] = []
     procedures: list[str] = []
@@ -26,7 +23,7 @@ class ExtractedMedicalBill(BaseModel):
     procedure_charges: float = 0
     other_charges: float = 0
     total_amount: float = 0
-    line_items: list[str] = []   # e.g. ["Consultation: ₹1000", "X-Ray: ₹500"]
+    line_items: list[str] = []
     payment_mode: str = ""
 
 
@@ -47,7 +44,7 @@ class ExtractedPharmacyBill(BaseModel):
     bill_date: str = ""
     patient_name: str = ""
     doctor_name: str = ""
-    medicines_purchased: list[str] = []   # e.g. ["Paracetamol 500mg x10 - ₹50"]
+    medicines_purchased: list[str] = []
     total_amount: float = 0
 
 
@@ -58,7 +55,7 @@ class ExtractionResults(BaseModel):
     pharmacy_bill: Optional[ExtractedPharmacyBill] = None
 
 
-# ── Adjudication decision ────────────────────────────────────────────────────
+# Adjudication Decision Output
 
 class AdjudicationDecision(BaseModel):
     claim_id: str
@@ -82,12 +79,12 @@ class DocumentAdjudicationResponse(BaseModel):
     policy_context: dict = {}
 
 
-# ── Member models ─────────────────────────────────────────────────────────────
+# Member Records
 
 class MemberCreate(BaseModel):
     member_id: str
     name: str
-    join_date: str                          # YYYY-MM-DD
+    join_date: str
     relationship: str = "employee"
 
 
@@ -97,5 +94,3 @@ class MemberRecord(BaseModel):
     join_date: str
     is_active: bool
     relationship: str
-
-
