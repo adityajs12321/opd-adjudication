@@ -8,29 +8,29 @@ backed by **PostgreSQL** (claim/member state) and **Neo4j** (the policy stored a
 
 ```
 ┌──────────────────────────────────────────────────────────────────────────────┐
-│                              Frontend (Next.js)                                │
-│   app/page.tsx — upload form + results panel        lib/types.ts — TS models   │
+│                              Frontend (Next.js)                              │
+│   app/page.tsx — upload form + results panel        lib/types.ts — TS models │
 └───────────────────────────────────┬──────────────────────────────────────────┘
-                                     │ HTTPS (multipart / JSON)
-                                     ▼
-┌──────────────────────────────────────────────────────────────────────────────┐
-│                              Backend (FastAPI · main.py)                       │
-│                                                                                │
-│   POST /adjudicate-documents   POST /members   GET /members/{id}   GET /health │
-│                                                                                │
-│   ┌────────────┐   ┌──────────────┐   ┌────────────────┐   ┌────────────────┐ │
-│   │ Extraction │──▶│ Rule engine  │──▶│ Policy retrieval│──▶│ Adjudication   │ │
-│   │ (Gemini)   │   │ (deterministic)│  │ (Neo4j cache)  │   │ (LangGraph)    │ │
-│   └─────┬──────┘   └──────┬───────┘   └───────┬────────┘   └───────┬────────┘ │
-│         │                 │                   │                    │          │
-└─────────┼─────────────────┼───────────────────┼────────────────────┼──────────┘
-          │                 │                   │                    │
-          ▼                 ▼                   ▼                    ▼
-    ┌──────────┐      ┌──────────┐        ┌──────────┐        ┌──────────┐
-    │  Gemini  │      │ Postgres │        │  Neo4j   │        │  Gemini  │
-    │   API    │      │ (claims, │        │ (policy  │        │   API    │
-    │          │      │ members) │        │  graph)  │        │ (agents) │
-    └──────────┘      └──────────┘        └──────────┘        └──────────┘
+                                    │ HTTPS (multipart / JSON)
+                                    ▼
+┌───────────────────────────────────────────────────────────────────────────────────┐
+│                              Backend (FastAPI · main.py)                          │
+│                                                                                   │
+│   POST /adjudicate-documents   POST /members   GET /members/{id}   GET /health    │
+│                                                                                   │
+│   ┌────────────┐   ┌────────────────┐   ┌─────────────────┐   ┌────────────────┐  │
+│   │ Extraction │──▶│ Rule engine    │──▶│ Policy retrieval│──▶│ Adjudication   │  │
+│   │ (Gemini)   │   │ (deterministic)│   │ (Neo4j cache)   │   │ (LangGraph)    │  │
+│   └─────┬──────┘   └──────┬─────────┘   └───────┬─────────┘   └───────┬────────┘  │
+│         │                 │                     │                     │           │
+└─────────┼─────────────────┼─────────────────────┼─────────────────────┼───────────┘
+          │                 │                     │                     │
+          ▼                 ▼                     ▼                     ▼
+    ┌──────────┐      ┌──────────┐          ┌──────────┐          ┌──────────┐
+    │  Gemini  │      │ Postgres │          │  Neo4j   │          │  Gemini  │
+    │   API    │      │ (claims, │          │ (policy  │          │   API    │
+    │          │      │ members) │          │  graph)  │          │ (agents) │
+    └──────────┘      └──────────┘          └──────────┘          └──────────┘
 ```
 
 ## End-to-end flowchart
@@ -45,7 +45,7 @@ backed by **PostgreSQL** (claim/member state) and **Neo4j** (the policy stored a
                          └───────────┬──────────┘
                                      ▼
                     ┌────────────────────────────────┐
-                    │  Any hard rejection?           │
+                    │      Any hard rejection?       │
                     └───────┬───────────────┬────────┘
                        yes  │               │ no
                             ▼               ▼
@@ -56,7 +56,7 @@ backed by **PostgreSQL** (claim/member state) and **Neo4j** (the policy stored a
                     └──────────────┘  └─────────────┬────────────┘
                                                     ▼
                                       ┌──────────────────────────┐
-                                      │  Synthesis verdict       │
+                                      │    Synthesis verdict     │
                                       └──┬────────┬────────┬─────┘
                             all covered  │  mixed │  all   │ high fraud/
                                          ▼        ▼ excl.  ▼ ambiguous
@@ -130,6 +130,8 @@ them with the deterministic rule-engine findings and emits the final decision.
 See `database.py` for the SQL schema and `graph_store.py` for the graph model.
 
 ## Deployment topology
+
+Automated deployment to Vercel and Render through Github Actions.
 
 | Component | Host |
 |---|---|

@@ -1,10 +1,12 @@
-# Plum OPD Claim Adjudication Tool
+# OPD Claim Adjudication Tool
 
 AI-powered OPD (outpatient) insurance claim adjudication against policy **PLUM_OPD_2024**.
 A claimant uploads their claim documents (prescription, medical bill, diagnostic report,
 pharmacy bill); the system extracts the data, runs deterministic policy checks, and produces
 a structured decision — `APPROVED`, `REJECTED`, `PARTIAL`, or `MANUAL_REVIEW` — with the
 approved amount, rejection codes, confidence score, and step-by-step reasoning.
+
+Documentation is in the [Docs](https://github.com/adityajs12321/opd-adjudication/tree/main/docs) folder
 
 ## How it works
 
