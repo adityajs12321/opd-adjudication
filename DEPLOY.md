@@ -57,7 +57,7 @@ and each cold start rebuilds the policy graph in AuraDB (idempotent, safe).
 ## 3. Vercel (frontend)
 
 1. In Vercel → **Add New → Project** → import the `medical-docs` repo.
-2. Framework preset: **Next.js** (auto-detected). Root directory: repo root (default).
+2. Framework preset: **Next.js** (auto-detected). **Root directory: `frontend`** (the frontend lives in its own folder).
 3. Add an environment variable:
    - `NEXT_PUBLIC_API_URL` = `https://plum-opd-backend.onrender.com` (your Render URL, no trailing slash)
 4. Deploy. Note the resulting URL, e.g. `https://your-app.vercel.app`.
