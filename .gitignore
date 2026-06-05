@@ -1,10 +1,9 @@
 .venv
 plum_intern_assignment.md
-policy_terms.json
 CLAUDE.md
 sample_documents_guide.md
-test_cases.json
 .claude
+.env
 .env.local
 backend/.env
 adjudication_rules.md

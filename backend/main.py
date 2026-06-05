@@ -32,9 +32,16 @@ load_dotenv()
 
 app = FastAPI(title="Plum OPD Adjudication API", version="2.0.0")
 
+# Comma-separated list of allowed frontend origins; localhost stays available for dev.
+_frontend_origins = [
+    o.strip()
+    for o in os.environ.get("FRONTEND_URLS", "http://localhost:3000").split(",")
+    if o.strip()
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],
+    allow_origins=_frontend_origins,
     allow_methods=["POST", "GET"],
     allow_headers=["Content-Type"],
 )
