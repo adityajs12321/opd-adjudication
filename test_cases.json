@@ -70,24 +70,25 @@
         "member_id": "EMP003",
         "member_name": "Amit Verma",
         "treatment_date": "2026-06-01",
-        "claim_amount": 7500,
+        "claim_amount": 30000,
         "documents": {
           "prescription": {
             "doctor_name": "Dr. Gupta",
             "doctor_reg": "DL/34567/2016",
-            "diagnosis": "Gastroenteritis",
-            "medicines_prescribed": ["Antibiotics", "Probiotics"]
+            "diagnosis": "Gastroenteritis with severe dehydration",
+            "medicines_prescribed": ["IV fluids", "Antibiotics", "Probiotics"],
+            "procedures": ["Day-care IV rehydration and monitoring"]
           },
           "bill": {
             "consultation_fee": 2000,
-            "medicines": 5500
+            "procedure_charges": 28000
           }
         }
       },
       "expected_output": {
         "decision": "REJECTED",
         "rejection_reasons": ["PER_CLAIM_EXCEEDED"],
-        "notes": "Claim amount exceeds per-claim limit of ₹5000",
+        "notes": "Claim amount ₹30000 exceeds per-claim limit of ₹25000",
         "confidence_score": 0.98
       }
     },

@@ -2,14 +2,27 @@
 
 import { useRef, useState } from 'react';
 import {
+  ClipboardList,
+  ReceiptText,
+  Microscope,
+  Pill,
+  ScrollText,
+  ShieldCheck,
+  UserPlus,
+  X,
+} from 'lucide-react';
+import {
   AdjudicationDecision,
   DocumentAdjudicationResponse,
   ExtractedDiagnosticReport,
   ExtractedMedicalBill,
   ExtractedPharmacyBill,
   ExtractedPrescription,
+  MemberRecord,
   PolicyContext,
 } from '@/lib/types';
+
+const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
 
 // ── Decision badge config ─────────────────────────────────────────────────────
 
@@ -52,7 +65,7 @@ function ExtractionCard({
   children,
 }: {
   title: string;
-  icon: string;
+  icon: React.ReactNode;
   children: React.ReactNode;
 }) {
   const [open, setOpen] = useState(true);
@@ -64,7 +77,7 @@ function ExtractionCard({
         className="w-full flex items-center justify-between px-4 py-3 bg-gray-50 hover:bg-gray-100 transition-colors"
       >
         <span className="flex items-center gap-2 text-sm font-semibold text-gray-700">
-          <span>{icon}</span>
+          {icon}
           {title}
         </span>
         <span className="text-gray-400 text-xs">{open ? '▲' : '▼'}</span>
@@ -83,7 +96,7 @@ function UploadBox({
   onChange,
 }: {
   label: string;
-  icon: string;
+  icon: React.ReactNode;
   required?: boolean;
   fileRef: React.RefObject<HTMLInputElement>;
   file: File | null;
@@ -92,17 +105,17 @@ function UploadBox({
   return (
     <div
       className={`border-2 border-dashed rounded-xl p-5 flex flex-col items-center gap-2 cursor-pointer transition-colors ${
-        file ? 'border-violet-400 bg-violet-50' : 'border-gray-300 hover:border-violet-300 hover:bg-gray-50'
+        file ? 'border-gray-900 bg-gray-50' : 'border-gray-300 hover:border-gray-400 hover:bg-gray-50'
       }`}
       onClick={() => fileRef.current?.click()}
     >
-      <span className="text-2xl">{icon}</span>
+      <span className={file ? 'text-gray-900' : 'text-gray-400'}>{icon}</span>
       <p className="text-sm font-medium text-gray-700 text-center">
         {label}
         {required && <span className="text-red-500 ml-1">*</span>}
       </p>
       {file ? (
-        <p className="text-xs text-violet-700 font-medium truncate max-w-full px-2">{file.name}</p>
+        <p className="text-xs text-gray-900 font-medium truncate max-w-full px-2">{file.name}</p>
       ) : (
         <p className="text-xs text-gray-400">Click to upload (image or PDF)</p>
       )}
@@ -138,6 +151,15 @@ export default function Home() {
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<DocumentAdjudicationResponse | null>(null);
 
+  const [memberModalOpen, setMemberModalOpen] = useState(false);
+
+  function handleMemberCreated(member: MemberRecord) {
+    // Pre-fill the claim form with the member we just created.
+    setMemberId(member.member_id);
+    setMemberJoinDate(member.join_date);
+    setMemberModalOpen(false);
+  }
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!prescriptionFile && !medicalBillFile) {
@@ -159,8 +181,7 @@ export default function Home() {
     if (pharmacyFile) form.append('pharmacy_bill', pharmacyFile);
 
     try {
-      const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
-      const res = await fetch(`${apiUrl}/adjudicate-documents`, {
+      const res = await fetch(`${API_URL}/adjudicate-documents`, {
         method: 'POST',
         body: form,
       });
@@ -179,26 +200,43 @@ export default function Home() {
 
   return (
     <main className="max-w-3xl mx-auto px-4 py-8">
+      {memberModalOpen && (
+        <CreateMemberModal
+          onClose={() => setMemberModalOpen(false)}
+          onCreated={handleMemberCreated}
+        />
+      )}
+
       {/* Header */}
       <div className="mb-8">
         <div className="flex items-center gap-3 mb-1">
-          <div className="w-8 h-8 bg-violet-600 rounded-lg flex items-center justify-center">
-            <span className="text-white text-sm font-bold">P</span>
+          <div className="w-8 h-8 bg-gray-900 rounded-lg flex items-center justify-center">
+            <ShieldCheck className="w-5 h-5 text-white" />
           </div>
-          <h1 className="text-2xl font-bold text-gray-900">Plum OPD Claim Adjudication</h1>
+          <h1 className="text-2xl font-bold text-gray-900">OPD Claim Adjudication</h1>
         </div>
       </div>
 
       <form onSubmit={handleSubmit} className="space-y-6">
         {/* Member info */}
         <section className="bg-white rounded-xl border border-gray-200 p-6">
-          <h2 className="text-base font-semibold text-gray-800 mb-4">Member Information</h2>
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-base font-semibold text-gray-800">Member Information</h2>
+            <button
+              type="button"
+              onClick={() => setMemberModalOpen(true)}
+              className="flex items-center gap-1.5 text-xs font-medium text-gray-700 border border-gray-300 rounded-lg px-3 py-1.5 hover:bg-gray-50 transition-colors"
+            >
+              <UserPlus className="w-4 h-4" />
+              New Member
+            </button>
+          </div>
           <div className="grid grid-cols-3 gap-4">
             <div>
               <label className="block text-xs font-medium text-gray-600 mb-1">Member ID *</label>
               <input
                 required
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-500"
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-gray-900"
                 value={memberId}
                 onChange={(e) => setMemberId(e.target.value)}
                 placeholder="EMP001"
@@ -211,7 +249,7 @@ export default function Home() {
               </label>
               <input
                 type="date"
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-500"
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-gray-900"
                 value={memberJoinDate}
                 onChange={(e) => setMemberJoinDate(e.target.value)}
               />
@@ -225,7 +263,7 @@ export default function Home() {
                 type="number"
                 min="0"
                 step="1"
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-500"
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-gray-900"
                 value={claimedAmount}
                 onChange={(e) => setClaimedAmount(e.target.value)}
                 placeholder="e.g. 1500"
@@ -243,7 +281,7 @@ export default function Home() {
           <div className="grid grid-cols-2 gap-4">
             <UploadBox
               label="Medical Prescription"
-              icon="📋"
+              icon={<ClipboardList className="w-7 h-7" />}
               required
               fileRef={prescriptionRef}
               file={prescriptionFile}
@@ -251,7 +289,7 @@ export default function Home() {
             />
             <UploadBox
               label="Medical Bill / Invoice"
-              icon="🧾"
+              icon={<ReceiptText className="w-7 h-7" />}
               required
               fileRef={medicalBillRef}
               file={medicalBillFile}
@@ -259,14 +297,14 @@ export default function Home() {
             />
             <UploadBox
               label="Diagnostic Test Report"
-              icon="🔬"
+              icon={<Microscope className="w-7 h-7" />}
               fileRef={diagnosticRef}
               file={diagnosticFile}
               onChange={setDiagnosticFile}
             />
             <UploadBox
               label="Pharmacy Bill"
-              icon="💊"
+              icon={<Pill className="w-7 h-7" />}
               fileRef={pharmacyRef}
               file={pharmacyFile}
               onChange={setPharmacyFile}
@@ -277,9 +315,9 @@ export default function Home() {
         <button
           type="submit"
           disabled={loading}
-          className="w-full py-3 bg-violet-600 text-white font-semibold rounded-xl hover:bg-violet-700 disabled:opacity-50 transition-colors text-sm"
+          className="w-full py-3 bg-gray-900 text-white font-semibold rounded-xl hover:bg-black disabled:opacity-50 transition-colors text-sm"
         >
-          {loading ? 'Processing documents & adjudicating…' : 'Process & Adjudicate'}
+          {loading ? 'Processing documents' : 'Process'}
         </button>
       </form>
 
@@ -298,22 +336,22 @@ export default function Home() {
             <h2 className="text-base font-semibold text-gray-800 mb-3">Extracted Data</h2>
             <div className="space-y-3">
               {extractions.prescription && (
-                <ExtractionCard title="Prescription" icon="📋">
+                <ExtractionCard title="Prescription" icon={<ClipboardList className="w-4 h-4" />}>
                   <PrescriptionView data={extractions.prescription} />
                 </ExtractionCard>
               )}
               {extractions.medical_bill && (
-                <ExtractionCard title="Medical Bill" icon="🧾">
+                <ExtractionCard title="Medical Bill" icon={<ReceiptText className="w-4 h-4" />}>
                   <MedicalBillView data={extractions.medical_bill} />
                 </ExtractionCard>
               )}
               {extractions.diagnostic_report && (
-                <ExtractionCard title="Diagnostic Report" icon="🔬">
+                <ExtractionCard title="Diagnostic Report" icon={<Microscope className="w-4 h-4" />}>
                   <DiagnosticView data={extractions.diagnostic_report} />
                 </ExtractionCard>
               )}
               {extractions.pharmacy_bill && (
-                <ExtractionCard title="Pharmacy Bill" icon="💊">
+                <ExtractionCard title="Pharmacy Bill" icon={<Pill className="w-4 h-4" />}>
                   <PharmacyView data={extractions.pharmacy_bill} />
                 </ExtractionCard>
               )}
@@ -413,6 +451,147 @@ export default function Home() {
   );
 }
 
+// ── Create member modal ───────────────────────────────────────────────────────
+
+function CreateMemberModal({
+  onClose,
+  onCreated,
+}: {
+  onClose: () => void;
+  onCreated: (member: MemberRecord) => void;
+}) {
+  const [memberId, setMemberId] = useState('');
+  const [name, setName] = useState('');
+  const [joinDate, setJoinDate] = useState('');
+  const [relationship, setRelationship] = useState('employee');
+
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function handleCreate(e: React.FormEvent) {
+    e.preventDefault();
+    setSaving(true);
+    setError(null);
+    try {
+      const res = await fetch(`${API_URL}/members`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          member_id: memberId.trim(),
+          name: name.trim(),
+          join_date: joinDate,
+          relationship,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail ?? data.error ?? `HTTP ${res.status}`);
+      onCreated(data as MemberRecord);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unknown error');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4"
+      onClick={onClose}
+    >
+      <div
+        className="w-full max-w-md bg-white rounded-2xl shadow-xl overflow-hidden"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
+          <h2 className="flex items-center gap-2 text-base font-semibold text-gray-800">
+            <UserPlus className="w-5 h-5" />
+            Create New Member
+          </h2>
+          <button
+            type="button"
+            onClick={onClose}
+            className="text-gray-400 hover:text-gray-700 transition-colors"
+            aria-label="Close"
+          >
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        <form onSubmit={handleCreate} className="px-6 py-5 space-y-4">
+          <div>
+            <label className="block text-xs font-medium text-gray-600 mb-1">Member ID *</label>
+            <input
+              required
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-gray-900"
+              value={memberId}
+              onChange={(e) => setMemberId(e.target.value)}
+              placeholder="EMP001"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-600 mb-1">Full Name *</label>
+            <input
+              required
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-gray-900"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="Rajesh Kumar"
+            />
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">Join Date *</label>
+              <input
+                required
+                type="date"
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-gray-900"
+                value={joinDate}
+                onChange={(e) => setJoinDate(e.target.value)}
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">Relationship</label>
+              <select
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-gray-900"
+                value={relationship}
+                onChange={(e) => setRelationship(e.target.value)}
+              >
+                <option value="employee">Employee</option>
+                <option value="spouse">Spouse</option>
+                <option value="child">Child</option>
+                <option value="parent">Parent</option>
+              </select>
+            </div>
+          </div>
+
+          {error && (
+            <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 text-xs break-words">
+              {error}
+            </div>
+          )}
+
+          <div className="flex justify-end gap-2 pt-1">
+            <button
+              type="button"
+              onClick={onClose}
+              className="px-4 py-2 text-sm font-medium text-gray-700 rounded-lg hover:bg-gray-100 transition-colors"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={saving}
+              className="px-4 py-2 text-sm font-semibold text-white bg-gray-900 rounded-lg hover:bg-black disabled:opacity-50 transition-colors"
+            >
+              {saving ? 'Creating…' : 'Create Member'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
 // ── Policy context card ───────────────────────────────────────────────────────
 
 function PolicyContextCard({ ctx }: { ctx: PolicyContext }) {
@@ -428,7 +607,7 @@ function PolicyContextCard({ ctx }: { ctx: PolicyContext }) {
         className="w-full flex items-center justify-between px-4 py-3 bg-gray-50 hover:bg-gray-100 transition-colors"
       >
         <span className="flex items-center gap-2 text-sm font-semibold text-gray-700">
-          <span>📜</span>
+          <ScrollText className="w-4 h-4" />
           Retrieved Policy Terms
         </span>
         <span className="text-gray-400 text-xs">{open ? '▲' : '▼'}</span>

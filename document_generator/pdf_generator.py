@@ -415,8 +415,6 @@ def generate_medical_bill_pdf(ctx: ClaimContext | None = None,
         medicine_charge = rng.choice([0, 250, 450, 700, 1100])
 
         if edge_cases:
-            if rng.random() < 0.12 and test_items:
-                cancelled = test_items.pop()
             if rng.random() < 0.08:
                 refund = ("Refund - duplicate charge", -rng.choice([200, 500]))
             if rng.random() < 0.1:
@@ -437,10 +435,25 @@ def generate_medical_bill_pdf(ctx: ClaimContext | None = None,
     bill_no   = data.bill_number(rng, "BILL")
     pay_mode  = rng.choice(data.PAYMENT_MODES)
 
+    # Total-preserving edge displays — mirror generator.generate_medical_bill so
+    # PNG/PDF stay identical under format='both'.
+    if rng.random() < 0.15:
+        cancelled = (rng.choice(data.CANCELLED_ITEM_POOL),
+                     rng.choice([300, 450, 500, 650, 800]))
+    part_paid = round(total * rng.uniform(0.4, 0.7)) if rng.random() < 0.15 else None
+
+    # Per-hospital bill layout (deterministic from the hospital name).
+    spec   = data.bill_template_spec(ctx.clinic_name)
+    afmt   = spec["amount_fmt"]
+    halign = spec["header_align"]
+
     cv = PDFCanvas()
-    cv.text(ctx.clinic_name, "serif_bold", 24, align="center", color=(30, 30, 30))
-    cv.text(ctx.clinic_address, "sans", 10, align="center", color=(80, 80, 80))
-    cv.text(f"GST No: {data.gst_number(rng)}", "sans", 10, align="center", color=(80, 80, 80))
+    cv.text(ctx.clinic_name, "serif_bold", 24, align=halign, color=(30, 30, 30))
+    cv.text(ctx.clinic_address, "sans", 10, align=halign, color=(80, 80, 80))
+    if spec["show_gst"]:
+        cv.text(f"GST No: {data.gst_number(rng)}", "sans", 10, align=halign, color=(80, 80, 80))
+    if spec["caption"]:
+        cv.text(spec["caption"], "sans_bold", 13, align="center", color=(90, 90, 90))
     if "multilingual" in variations:
         ctx.language = rng.choice(["hi", "kn", "ta"])
         if _FONTS.get(ctx.language):
@@ -450,7 +463,7 @@ def generate_medical_bill_pdf(ctx: ClaimContext | None = None,
 
     cv.row([f"Bill No: {bill_no}", f"Date: {ctx.consultation_date}"], [0, 320], "sans", 12)
     cv.gap(4)
-    cv.text("Patient Details:", "sans_bold", 12)
+    cv.text(spec["patient_label"], "sans_bold", 12)
     if is_family:
         cv.kv("Names:", ", ".join(ctx.family_members), "sans", 12)
     else:
@@ -458,33 +471,35 @@ def generate_medical_bill_pdf(ctx: ClaimContext | None = None,
     cv.kv("Ref. By:", ctx.doctor_name, "sans", 12)
     cv.rule(dashed=True)
 
-    cv.row(["PARTICULARS", "AMOUNT (Rs.)"], _BILL_XS, "sans_bold", 13)
+    cv.row(list(spec["col_header"]), _BILL_XS, "sans_bold", 13)
     cv.rule(dashed=True)
-    for label, amt in line_items:
+    for idx, (label, amt) in enumerate(line_items, 1):
+        disp = f"{idx}. {label.strip()}" if spec["numbered"] else label
         clr = (0.63, 0.16, 0.16) if amt < 0 else (0.08, 0.08, 0.08)
-        cv.row([label, f"{amt:,}"], _BILL_XS, "mono", 11, color=clr)
+        cv.row([disp, data.fmt_amount(amt, afmt)], _BILL_XS, "mono", 11, color=clr)
     if cancelled:
-        cv.row([f"  {cancelled[0]} (CANCELLED)", f"{cancelled[1]:,}"],
+        cv.row([f"  {cancelled[0]} (CANCELLED)", data.fmt_amount(cancelled[1], afmt)],
                _BILL_XS, "mono", 11, color=(0.59, 0.59, 0.59))
         cv.strikethrough(color=(0.59, 0.12, 0.12))
     cv.rule(dashed=True)
-    cv.row(["TOTAL", f"{total:,}"], _BILL_XS, "mono_bold", 14, color=(25, 55, 110))
+    cv.row([spec["total_label"], data.fmt_amount(total, afmt)], _BILL_XS, "mono_bold", 14,
+           color=(25, 55, 110))
     cv.gap(3)
     cv.text(f"Amount in Words: {data.amount_in_words(total)}", "sans", 9, color=(70, 70, 70))
     cv.gap(8)
 
-    if edge_cases and rng.random() < 0.12:
-        paid = round(total * rng.uniform(0.4, 0.7))
+    if part_paid is not None:
         cv.kv("Payment Mode:", f"{pay_mode} (PART PAYMENT)", "sans", 12)
-        cv.kv("Amount Paid:",  f"Rs.{paid:,}", "sans", 12)
-        cv.kv("Balance Due:",  f"Rs.{total - paid:,}", "sans", 12,
+        cv.kv("Amount Paid:",  f"Rs.{part_paid:,}", "sans", 12)
+        cv.kv("Balance Due:",  f"Rs.{total - part_paid:,}", "sans", 12,
               val_color=(0.63, 0.16, 0.16))
     else:
         cv.kv("Payment Mode:", pay_mode, "sans", 12)
         if pay_mode != "Cash":
             cv.kv("Transaction ID:", f"TXN{rng.randint(10**9, 10**10 - 1)}", "sans", 12)
     cv.gap(35)
-    cv.text("Authorized Signatory & Stamp", "sans", 10, align="right", color=(120, 120, 120))
+    cv.text(spec["footer"].format(hospital=ctx.clinic_name), "sans", 10, align="right",
+            color=(120, 120, 120))
 
     pdf_bytes = _apply_pdf_variations(cv, variations, rng, ctx, "medical_bill")
     if line_items_override is not None:
@@ -515,6 +530,7 @@ def generate_medical_bill_pdf(ctx: ClaimContext | None = None,
             "cancelled_item": cancelled[0] if cancelled else None,
             "refund": refund[1] if refund else None,
             "family_members": ctx.family_members or None,
+            "part_payment": part_paid,
         },
     }
     return pdf_bytes, gt

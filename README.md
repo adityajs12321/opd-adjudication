@@ -1,86 +1,154 @@
-# Plum AI Automation Engineer \- Intern Assignment Package
+# Plum OPD Claim Adjudication Tool
 
-## 📋 Overview
+AI-powered OPD (outpatient) insurance claim adjudication against policy **PLUM_OPD_2024**.
+A claimant uploads their claim documents (prescription, medical bill, diagnostic report,
+pharmacy bill); the system extracts the data, runs deterministic policy checks, and produces
+a structured decision — `APPROVED`, `REJECTED`, `PARTIAL`, or `MANUAL_REVIEW` — with the
+approved amount, rejection codes, confidence score, and step-by-step reasoning.
 
-Welcome\! This package contains everything you need to complete the OPD Claim Adjudication Tool assignment for the AI Automation Engineer intern position at Plum.
+## How it works
 
-## 📁 Package Contents
+The adjudication pipeline is a hybrid of deterministic rules and LLM judgment:
 
-assignment\_package/
+```
+documents ─▶ extraction ─▶ rule engine ─▶ policy retrieval ─▶ multi-agent adjudication ─▶ decision
+            (Gemini)       (numeric /      (Neo4j graph)       (LangGraph: 4 specialists
+                            date checks)                        + synthesis)
+```
 
-│
+1. **Extraction** — each uploaded document is sent to Gemini in parallel and parsed into a
+   structured Pydantic model.
+2. **Rule engine** (`rule_engine.py`) — deterministic, no LLM. Handles everything numeric or
+   date-based: per-claim / annual / sub-limits, copay, waiting periods, submission deadline,
+   missing/illegible documents, duplicate claims, member eligibility, doctor-registration
+   format, pre-auth flags. Produces a `max_approvable` ceiling and a suggested decision.
+3. **Policy retrieval** (`graph_store.py`) — the policy is stored once in Neo4j as a graph;
+   per claim, only the relevant policy nodes are retrieved and passed to the agents.
+4. **Multi-agent adjudication** (`adjudication_graph.py`) — a LangGraph workflow runs four
+   specialist agents in parallel — **Coverage**, **Medical Necessity**, **Document Validity**,
+   **Fraud** — then a **Synthesis** node merges their findings with the rule-engine output.
+   The final approved amount is computed deterministically (it can never exceed `max_approvable`
+   or the actual billed amount), so the LLM decides the verdict but not the rupee figure.
 
-├── README.md                       \# This file
+## Tech stack
 
-├── plum\_intern\_assignment.md       \# Main assignment document with requirements
+| Layer | Technology |
+|---|---|
+| Frontend | Next.js, TypeScript, Tailwind CSS |
+| Backend | FastAPI |
+| LLM | Google Gemini |
+| Orchestration | LangGraph (multi-agent) |
+| Database | PostgreSQL (members, claims, claim documents) |
+| Policy graph | Neo4j |
 
-├── policy\_terms.json               \# Insurance policy configuration
+## Project structure
 
-├── adjudication\_rules.md          \# Business logic for claim decisions
+```
+backend/
+  main.py               # FastAPI app — endpoints + pipeline orchestration
+  rule_engine.py        # Deterministic pre-processing (limits, dates, docs)
+  document_extractor.py # Per-document Gemini extraction
+  adjudication_graph.py # LangGraph multi-agent adjudication + synthesis
+  graph_store.py        # Neo4j policy graph build + per-claim retrieval
+  database.py           # Postgres access (members, claims, documents)
+  models.py             # Pydantic models
+  requirements.txt
+  .env.example
+frontend/
+  app/                  # page.tsx (upload form + results), layout, globals.css
+  lib/types.ts          # TypeScript mirrors of the Pydantic models
+  package.json
+policy_terms.json       # Coverage limits, sub-limits, exclusions, network hospitals
+adjudication_rules.json # Adjudication logic + rejection codes (read by backend)
+adjudication_rules.md   # Human-readable source for the rules
+test_cases.json         # 10 canonical test scenarios
+render.yaml             # Render Blueprint for backend deploy
+```
 
-├── test\_cases.json                 \# Test scenarios with expected outputs
+## Prerequisites
 
-└── sample\_documents\_guide.md       \# Guide for creating test documents
+- **Python 3.12+** and **Node.js 18+**
+- A **Google Gemini API key** — https://aistudio.google.com/apikey
+- A running **PostgreSQL** instance
+- A running **Neo4j** instance (local Neo4j Desktop, or Neo4j AuraDB)
 
-## 🎯 Your Mission
+## Setup
 
-Build an AI-powered web application that automates the adjudication (approval/rejection) of OPD insurance claims by:
+### 1. Backend
 
-1. Processing medical documents (bills, prescriptions)  
-2. Extracting relevant information using AI/LLMs  
-3. Validating against policy terms  
-4. Making intelligent approval/rejection decisions
+```bash
+cd backend
+python -m venv .venv && source .venv/bin/activate   # optional but recommended
+pip install -r requirements.txt
+cp .env.example .env                                 # then edit .env with your values
+```
 
-## 🚀 Getting Started
+Edit `backend/.env`:
 
-### Step 1: Read the Assignment
+```ini
+GEMINI_API_KEY=your_gemini_api_key_here
+DATABASE_URL=postgresql://postgres:password@localhost:5432/opd
+NEO4J_URI=bolt://localhost:7687          # neo4j+s://... for AuraDB
+NEO4J_USER=neo4j
+NEO4J_PASSWORD=your_neo4j_password
+FRONTEND_URLS=http://localhost:3000      # comma-separated for multiple origins
+```
 
-Start with `plum_intern_assignment.md` to understand the full requirements and evaluation criteria.
+Run the dev server (tables and the policy graph are initialized automatically on startup):
 
-### Step 2: Understand the Business Logic
+```bash
+uvicorn main:app --reload   # http://localhost:8000
+```
 
-- Review `policy_terms.json` to understand coverage limits and exclusions  
-- Study `adjudication_rules.md` to learn the decision-making process  
-- Examine `test_cases.json` to see expected behavior
+### 2. Frontend
 
-### Step 3: Set Up Your Development Environment
+```bash
+cd frontend
+npm install
+```
 
-\# Clone this assignment package
+Create `frontend/.env.local`:
 
-\# Set up your preferred tech stack (React/Next.js \+ Node/Python)
+```ini
+NEXT_PUBLIC_API_URL=http://localhost:8000
+```
 
-\# Get API keys for LLM services (OpenAI, Claude, or open-source)
+Run the dev server:
 
-### Step 4: Create Test Documents
+```bash
+npm run dev   # http://localhost:3000
+```
 
-Use `sample_documents_guide.md` to understand medical document formats and create mock documents for testing.
+## Usage
 
-### Step 5: Build Your Solution
+1. Open http://localhost:3000.
+2. Create a member first through a backend call (/members) (a claim must belong to a known member).
+3. Upload the claim documents and submit. The result panel shows the decision, approved amount,
+   rejection codes, confidence, and the specialist agents' reasoning.
 
-Focus on:
+## Decision schema
 
-- Document upload and processing  
-- AI-powered data extraction  
-- Rule engine implementation  
-- Clean, intuitive UI  
-- Comprehensive testing
+Every adjudication returns:
 
-## 💡 Pro Tips
+- `decision` — `APPROVED | REJECTED | PARTIAL | MANUAL_REVIEW`
+- `approved_amount` — INR approved (computed deterministically, capped at the billed amount)
+- `rejection_reasons` — error codes (e.g. `PER_CLAIM_EXCEEDED`, `WAITING_PERIOD`,
+  `SERVICE_NOT_COVERED`, `PRE_AUTH_MISSING`)
+- `confidence_score` — 0.0–1.0
+- `notes`, `next_steps`
 
-1. **Start Simple**: Build a basic working version first, then add advanced features  
-2. **Use AI Tools**: We encourage using Cursor, Copilot, or other AI coding assistants  
-3. **Document Everything**: Clear documentation shows your thinking process  
-4. **Test Thoroughly**: Use all provided test cases and create additional ones  
-5. **Ask Early**: If something is unclear, ask within the first 24 hours
+## Testing
 
-## 📊 Evaluation Focus Areas
+`test_cases.json` contains 10 canonical scenarios (approvals, partial approvals, limit/waiting-period
+rejections, excluded treatments, pre-auth, fraud review). They are selectable from the UI's
+**Load test case** dropdown to verify adjudication behavior without filling the form manually.
 
-- **Core Functionality** (40%): Does it work correctly?  
-- **AI Integration** (25%): How effectively do you use LLMs?  
-- **Code Quality** (20%): Is the code clean and maintainable?  
-- **User Experience** (15%): Is it easy to use?
+## Deployment
 
-## ⏰ Timeline
+The app is designed to deploy as: frontend on **Vercel** (root directory `frontend`), backend on
+**Render** (see `render.yaml`, root directory `backend`), Postgres on **Supabase**, and the policy
+graph on **Neo4j AuraDB**.
 
-- **Total Duration**: 2-3 days from receipt
+## LICENCE
 
+MIT

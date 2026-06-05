@@ -89,3 +89,20 @@ export interface DocumentAdjudicationResponse {
   decision: AdjudicationDecision;
   policy_context: PolicyContext;
 }
+
+// ── Members ───────────────────────────────────────────────────────────────────
+
+export interface MemberCreate {
+  member_id: string;
+  name: string;
+  join_date: string;
+  relationship?: string;
+}
+
+export interface MemberRecord {
+  member_id: string;
+  name: string;
+  join_date: string;
+  is_active: boolean;
+  relationship: string;
+}

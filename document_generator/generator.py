@@ -200,8 +200,6 @@ def generate_medical_bill(ctx: ClaimContext | None = None,
         medicine_charge = rng.choice([0, 250, 450, 700, 1100])
 
         if edge_cases:
-            if rng.random() < 0.12 and test_items:
-                cancelled = test_items.pop()
             if rng.random() < 0.08:
                 refund = ("Refund - duplicate charge", -rng.choice([200, 500]))
             if rng.random() < 0.1:
@@ -221,10 +219,27 @@ def generate_medical_bill(ctx: ClaimContext | None = None,
     bill_no = data.bill_number(rng, "BILL")
     pay_mode = rng.choice(data.PAYMENT_MODES)
 
+    # Total-preserving edge displays — shown in both the test-case (override) and
+    # random paths. Cancelled is a fabricated struck-through line that is NOT
+    # summed; part-payment only splits the payment block, never the total.
+    if rng.random() < 0.15:
+        cancelled = (rng.choice(data.CANCELLED_ITEM_POOL),
+                     rng.choice([300, 450, 500, 650, 800]))
+    part_paid = round(total * rng.uniform(0.4, 0.7)) if rng.random() < 0.15 else None
+
+    # Per-hospital bill layout (deterministic from the hospital name).
+    spec = data.bill_template_spec(ctx.clinic_name)
+    afmt = spec["amount_fmt"]
+    halign = spec["header_align"]
+
     c = Canvas()
-    c.text(ctx.clinic_name, font("serif_bold", 32), align="center", color=(30, 30, 30))
-    c.text(ctx.clinic_address, font("sans", 15), align="center", color=(80, 80, 80))
-    c.text(f"GST No: {data.gst_number(rng)}", font("sans", 15), align="center", color=(80, 80, 80))
+    c.text(ctx.clinic_name, font("serif_bold", 32), align=halign, color=(30, 30, 30))
+    c.text(ctx.clinic_address, font("sans", 15), align=halign, color=(80, 80, 80))
+    if spec["show_gst"]:
+        c.text(f"GST No: {data.gst_number(rng)}", font("sans", 15), align=halign,
+               color=(80, 80, 80))
+    if spec["caption"]:
+        c.text(spec["caption"], font("sans_bold", 18), align="center", color=(90, 90, 90))
     if "multilingual" in variations:
         ctx.language = rng.choice(["hi", "kn", "ta"])
         c.text(data.MULTILINGUAL_TAGLINES[ctx.language][0], font(ctx.language, 18),
@@ -234,7 +249,7 @@ def generate_medical_bill(ctx: ClaimContext | None = None,
     f = font("sans", 18)
     c.row([f"Bill No: {bill_no}", f"Date: {ctx.consultation_date}"], [0, 560], f)
     c.gap(6)
-    c.text("Patient Details:", font("sans_bold", 18))
+    c.text(spec["patient_label"], font("sans_bold", 18))
     if is_family:
         c.kv("Names:", ", ".join(ctx.family_members), f)
     else:
@@ -242,36 +257,38 @@ def generate_medical_bill(ctx: ClaimContext | None = None,
     c.kv("Ref. By:", ctx.doctor_name, f)
     c.rule(dashed=True)
 
-    c.row(["PARTICULARS", "AMOUNT (Rs.)"], [0, 640], font("sans_bold", 18))
+    c.row(list(spec["col_header"]), [0, 640], font("sans_bold", 18))
     c.rule(dashed=True)
     mono = font("mono", 18)
-    for label, amt in line_items:
-        c.row([label, f"{amt:,}"], [0, 640], mono,
+    for idx, (label, amt) in enumerate(line_items, 1):
+        disp = f"{idx}. {label.strip()}" if spec["numbered"] else label
+        c.row([disp, data.fmt_amount(amt, afmt)], [0, 640], mono,
               color=(160, 40, 40) if amt < 0 else (20, 20, 20))
     if cancelled:
-        # struck-through cancelled item
-        c.row([f"  {cancelled[0]} (CANCELLED)", f"{cancelled[1]:,}"], [0, 640],
-              mono, color=(150, 150, 150))
+        # struck-through cancelled item (excluded from the total)
+        c.row([f"  {cancelled[0]} (CANCELLED)", data.fmt_amount(cancelled[1], afmt)],
+              [0, 640], mono, color=(150, 150, 150))
         yline = c.y - 18
         c.draw.line([(c.margin, yline), (c.margin + 760, yline)], fill=(150, 30, 30), width=2)
     c.rule(dashed=True)
-    c.row(["TOTAL", f"{total:,}"], [0, 640], font("mono_bold", 20), color=(25, 55, 110))
+    c.row([spec["total_label"], data.fmt_amount(total, afmt)], [0, 640],
+          font("mono_bold", 20), color=(25, 55, 110))
     c.gap(4)
     c.text(f"Amount in Words: {data.amount_in_words(total)}", font("sans", 15),
            color=(70, 70, 70))
     c.gap(10)
 
-    if edge_cases and rng.random() < 0.12:
-        paid = round(total * rng.uniform(0.4, 0.7))
+    if part_paid is not None:
         c.kv("Payment Mode:", f"{pay_mode} (PART PAYMENT)", f)
-        c.kv("Amount Paid:", f"Rs.{paid:,}", f)
-        c.kv("Balance Due:", f"Rs.{total - paid:,}", f, val_color=(160, 40, 40))
+        c.kv("Amount Paid:", f"Rs.{part_paid:,}", f)
+        c.kv("Balance Due:", f"Rs.{total - part_paid:,}", f, val_color=(160, 40, 40))
     else:
         c.kv("Payment Mode:", pay_mode, f)
         if pay_mode != "Cash":
             c.kv("Transaction ID:", f"TXN{rng.randint(10**9, 10**10 - 1)}", f)
     c.gap(40)
-    c.text("Authorized Signatory & Stamp", font("sans", 15), align="right", color=(120, 120, 120))
+    c.text(spec["footer"].format(hospital=ctx.clinic_name), font("sans", 15),
+           align="right", color=(120, 120, 120))
 
     img = _apply_post(c.finish(), variations, rng, ctx, "medical_bill")
     if line_items_override is not None:
@@ -301,6 +318,7 @@ def generate_medical_bill(ctx: ClaimContext | None = None,
             "cancelled_item": cancelled[0] if cancelled else None,
             "refund": refund[1] if refund else None,
             "family_members": ctx.family_members or None,
+            "part_payment": part_paid,
         },
     }
     return img, gt

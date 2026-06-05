@@ -78,59 +78,107 @@ def run_rule_engine(
             "reason": "Prescription uploaded but no medical bill or pharmacy bill provided. No claimable amount can be determined.",
         })
 
-    # Documentation: illegible documents (critical fields missing)
-    # Check each uploaded document for individually missing critical fields.
-    # Any single required field missing flags the document — not just all-empty.
+    # Documentation: legibility vs completeness
+    #
+    # Two distinct signals — do NOT conflate them:
+    #   ILLEGIBLE_DOCUMENTS      → extraction returned essentially nothing, meaning the
+    #                              scan was unreadable / the wrong file / corrupt.
+    #   INCOMPLETE_DOCUMENTATION → the document was read fine but a specific field is
+    #                              absent. A legible bill is NOT illegible just because
+    #                              one field didn't populate.
 
     if rx is not None:
-        missing = []
-        if not rx.diagnosis:
-            missing.append("diagnosis")
-        if not rx.medicines_prescribed and not rx.tests_advised:
-            missing.append("medicines or tests prescribed")
-        if missing:
+        rx_has_content = bool(
+            rx.doctor_name or rx.diagnosis or rx.canonical_conditions
+            or rx.medicines_prescribed or rx.tests_advised or rx.procedures
+        )
+        if not rx_has_content:
             warnings.append({
                 "code": "ILLEGIBLE_DOCUMENTS",
-                "reason": f"Prescription is missing required fields: {', '.join(missing)}.",
+                "reason": "Prescription could not be read — no information was extractable. The scan may be illegible or the wrong file.",
             })
+        else:
+            missing = []
+            if not rx.diagnosis and not rx.canonical_conditions:
+                missing.append("diagnosis")
+            if not rx.medicines_prescribed and not rx.tests_advised and not rx.procedures:
+                missing.append("medicines, tests, or procedures")
+            if missing:
+                warnings.append({
+                    "code": "INCOMPLETE_DOCUMENTATION",
+                    "reason": f"Prescription is readable but missing: {', '.join(missing)}.",
+                })
 
     if bill is not None:
-        missing = []
-        if bill.total_amount == 0:
-            missing.append("total amount")
-        if not bill.bill_date:
-            missing.append("bill date")
-        if not bill.hospital_name:
-            missing.append("hospital name")
-        if missing:
+        # An amount counts if it appears in the total OR any itemised component.
+        bill_amount = bill.total_amount or (
+            bill.consultation_fee + bill.procedure_charges + bill.other_charges
+        )
+        bill_has_content = bool(
+            bill_amount or bill.hospital_name or bill.patient_name
+            or bill.bill_number or bill.line_items
+        )
+        if not bill_has_content:
             warnings.append({
                 "code": "ILLEGIBLE_DOCUMENTS",
-                "reason": f"Medical bill is missing required fields: {', '.join(missing)}.",
+                "reason": "Medical bill could not be read — no information was extractable. The scan may be illegible or the wrong file.",
             })
+        else:
+            missing = []
+            if not bill_amount:
+                missing.append("amount")
+            if not bill.bill_date:
+                missing.append("bill date")
+            if not bill.hospital_name:
+                missing.append("hospital name")
+            if missing:
+                warnings.append({
+                    "code": "INCOMPLETE_DOCUMENTATION",
+                    "reason": f"Medical bill is readable but missing: {', '.join(missing)}.",
+                })
 
     if pharmacy is not None:
-        missing = []
-        if pharmacy.total_amount == 0:
-            missing.append("total amount")
-        if not pharmacy.medicines_purchased:
-            missing.append("medicines purchased")
-        if missing:
+        pharmacy_has_content = bool(
+            pharmacy.total_amount or pharmacy.medicines_purchased
+            or pharmacy.pharmacy_name
+        )
+        if not pharmacy_has_content:
             warnings.append({
                 "code": "ILLEGIBLE_DOCUMENTS",
-                "reason": f"Pharmacy bill is missing required fields: {', '.join(missing)}.",
+                "reason": "Pharmacy bill could not be read — no information was extractable. The scan may be illegible or the wrong file.",
             })
+        else:
+            missing = []
+            if not pharmacy.total_amount:
+                missing.append("total amount")
+            if not pharmacy.medicines_purchased:
+                missing.append("medicines purchased")
+            if missing:
+                warnings.append({
+                    "code": "INCOMPLETE_DOCUMENTATION",
+                    "reason": f"Pharmacy bill is readable but missing: {', '.join(missing)}.",
+                })
 
     if diagnostic is not None:
-        missing = []
-        if not diagnostic.tests_performed:
-            missing.append("tests performed")
-        if not diagnostic.report_date:
-            missing.append("report date")
-        if missing:
+        diagnostic_has_content = bool(
+            diagnostic.tests_performed or diagnostic.lab_name or diagnostic.summary
+        )
+        if not diagnostic_has_content:
             warnings.append({
                 "code": "ILLEGIBLE_DOCUMENTS",
-                "reason": f"Diagnostic report is missing required fields: {', '.join(missing)}.",
+                "reason": "Diagnostic report could not be read — no information was extractable. The scan may be illegible or the wrong file.",
             })
+        else:
+            missing = []
+            if not diagnostic.tests_performed:
+                missing.append("tests performed")
+            if not diagnostic.report_date:
+                missing.append("report date")
+            if missing:
+                warnings.append({
+                    "code": "INCOMPLETE_DOCUMENTATION",
+                    "reason": f"Diagnostic report is readable but missing: {', '.join(missing)}.",
+                })
 
     # Documentation: invalid documents
     # Only validate when a prescription was uploaded; an absent prescription is
@@ -163,7 +211,10 @@ def run_rule_engine(
     hospital_name = (bill.hospital_name or "") if bill else ""
     bill_number = (bill.bill_number or "") if bill else ""
 
-    total_claimed = bill_total + pharmacy_total
+    # Robust "actually billed" figure: trust the printed total, but fall back to
+    # the sum of components if the total field didn't extract.
+    bill_billed = bill_total or round(consultation_fee + procedure_charges + other_charges, 2)
+    total_claimed = round(bill_billed + pharmacy_total, 2)
 
     # Min claim amount
 
@@ -282,6 +333,12 @@ def run_rule_engine(
                 ),
             })
         max_approvable = round(min(capped_subtotal, annual_remaining), 2)
+
+    # Hard ceiling: never approve more than was actually billed. Guards against
+    # per-line components being double-counted (or mis-extracted into several
+    # fields) and inflating the subtotal above the real bill total.
+    if total_claimed > 0:
+        max_approvable = round(min(max_approvable, total_claimed), 2)
 
     amount_analysis["total_claimed"] = total_claimed
     amount_analysis["per_claim_limit"] = per_claim_limit

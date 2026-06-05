@@ -2,7 +2,7 @@ import type { Metadata } from 'next';
 import './globals.css';
 
 export const metadata: Metadata = {
-  title: 'Plum OPD Claim Adjudication',
+  title: 'OPD Claim Adjudication',
   description: 'AI-powered OPD insurance claim adjudication tool',
 };
 

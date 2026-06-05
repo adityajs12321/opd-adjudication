@@ -73,10 +73,63 @@ class AdjudicationDecision(BaseModel):
         return self
 
 
+# Specialist agent findings (LangGraph multi-agent layer)
+
+class CoverageFinding(BaseModel):
+    item: str
+    status: Literal["covered", "excluded", "uncertain"]
+    reason: str = ""
+
+
+class CoverageReport(BaseModel):
+    findings: list[CoverageFinding] = []
+    # Best estimate of the rupee value attributable to the EXCLUDED items
+    # (including the consultation/tests/medicines that ride on an excluded
+    # treatment). 0 when nothing is excluded. Used to compute partial amounts.
+    excluded_amount: float = 0.0
+    summary: str = ""
+
+
+class NecessityFinding(BaseModel):
+    item: str
+    necessity: Literal["necessary", "not_necessary", "uncertain"]
+    reason: str = ""
+
+
+class NecessityReport(BaseModel):
+    findings: list[NecessityFinding] = []
+    summary: str = ""
+
+
+class ValidityFinding(BaseModel):
+    issue: str
+    severity: Literal["low", "medium", "high"]
+    detail: str = ""
+
+
+class ValidityReport(BaseModel):
+    documents_consistent: bool = True
+    findings: list[ValidityFinding] = []
+    summary: str = ""
+
+
+class FraudFinding(BaseModel):
+    indicator: str
+    severity: Literal["low", "medium", "high"]
+    detail: str = ""
+
+
+class FraudReport(BaseModel):
+    suspicion_level: Literal["none", "low", "medium", "high"] = "none"
+    findings: list[FraudFinding] = []
+    summary: str = ""
+
+
 class DocumentAdjudicationResponse(BaseModel):
     extractions: ExtractionResults
     decision: AdjudicationDecision
     policy_context: dict = {}
+    agent_reports: dict = {}
 
 
 # Member Records

@@ -10,12 +10,10 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from google import genai
-from google.genai import types
 
 import database as db
 import graph_store
 from models import (
-    AdjudicationDecision,
     DocumentAdjudicationResponse,
     ExtractedDiagnosticReport,
     ExtractedMedicalBill,
@@ -26,11 +24,12 @@ from models import (
     MemberRecord,
 )
 from rule_engine import run_rule_engine
-from document_extractor import extract_document
+from document_extractor import extract_document, agent_config
+from adjudication_graph import run_adjudication
 
 load_dotenv()
 
-app = FastAPI(title="Plum OPD Adjudication API", version="2.0.0")
+app = FastAPI(title="OPD Adjudication API", version="2.0.0")
 
 # Comma-separated list of allowed frontend origins; localhost stays available for dev.
 _frontend_origins = [
@@ -51,7 +50,6 @@ client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
 ROOT = Path(__file__).parent.parent
 _policy = (ROOT / "policy_terms.json").read_text()
 _policy_data: dict = json.loads(_policy)
-_rules = (ROOT / "adjudication_rules.json").read_text()
 
 
 @app.on_event("startup")
@@ -59,119 +57,6 @@ def startup():
     db.init_db()
     graph_store.init_graph(_policy_data)
 
-
-# ── Extraction prompts (one per document agent) ──────────────────────────────
-
-PRESCRIPTION_PROMPT = """You are a medical document extraction agent specializing in prescriptions.
-Extract all information from this prescription and return JSON with these exact fields:
-{
-  "doctor_name": "full name",
-  "doctor_registration": "registration number like KA/45678/2015",
-  "patient_name": "patient full name",
-  "consultation_date": "YYYY-MM-DD",
-  "diagnosis": "primary diagnosis exactly as written",
-  "canonical_conditions": ["normalised condition names — map the diagnosis to any that apply from this fixed list: diabetes, hypertension, joint_replacement, maternity, pre_existing_disease. Use the exact strings from the list. Examples: 'Type 2 DM' -> ['diabetes'], 'HTN' -> ['hypertension'], 'T2DM with hypertension' -> ['diabetes', 'hypertension']. Empty array if none apply."],
-  "medicines_prescribed": ["Medicine Name Dose - Duration"],
-  "tests_advised": ["Test Name"],
-  "procedures": ["procedure name if any"],
-  "notes": "any other clinical notes"
-}
-Use empty string for missing text fields and empty arrays for missing lists."""
-
-MEDICAL_BILL_PROMPT = """You are a medical document extraction agent specializing in hospital bills.
-Extract all information from this bill/invoice and return JSON with these exact fields:
-{
-  "hospital_name": "hospital or clinic name",
-  "bill_number": "bill or invoice number",
-  "bill_date": "YYYY-MM-DD",
-  "patient_name": "patient name",
-  "consultation_fee": 0.0,
-  "procedure_charges": 0.0,
-  "other_charges": 0.0,
-  "total_amount": 0.0,
-  "line_items": ["Item: ₹Amount"],
-  "payment_mode": "Cash/Card/UPI/etc"
-}
-Use 0 for missing numeric fields and empty arrays/strings for missing text."""
-
-DIAGNOSTIC_PROMPT = """You are a medical document extraction agent specializing in diagnostic reports.
-Extract all information from this lab/diagnostic report and return JSON with these exact fields:
-{
-  "lab_name": "laboratory name",
-  "accreditation": "NABL/CAP accreditation number if present",
-  "report_date": "YYYY-MM-DD",
-  "patient_name": "patient name",
-  "tests_performed": ["Test Name - Result (Normal Range)"],
-  "abnormal_findings": ["Test Name - abnormal value"],
-  "pathologist": "pathologist name",
-  "summary": "overall interpretation or remarks"
-}
-Use empty string for missing text fields and empty arrays for missing lists."""
-
-PHARMACY_BILL_PROMPT = """You are a medical document extraction agent specializing in pharmacy bills.
-Extract all information from this pharmacy/chemist bill and return JSON with these exact fields:
-{
-  "pharmacy_name": "pharmacy name",
-  "drug_license": "drug license number",
-  "bill_date": "YYYY-MM-DD",
-  "patient_name": "patient name",
-  "doctor_name": "prescribing doctor name",
-  "medicines_purchased": ["Medicine Name Qty x Pack - ₹Amount"],
-  "total_amount": 0.0
-}
-Use empty string for missing text fields, empty arrays for lists, and 0 for missing amounts."""
-
-# ── Adjudication system prompt ───────────────────────────────────────────────
-# Split into a static base (rules, constraints — built once at startup) and a
-# dynamic policy context block appended per-claim from the Neo4j graph query.
-
-_ADJUDICATION_BASE_PROMPT = f"""You are an expert OPD insurance claim adjudicator for Plum Insurance.
-
-The input you receive includes `rule_engine_findings` — the output of a deterministic rule engine
-that has already evaluated all numerical and date-based rules. Your job is to handle the
-non-deterministic aspects that require judgment:
-
-1. **Document validity**: Are prescriptions authentic? Doctor registration format valid ([State]/[Number]/[Year])? Dates consistent across documents?
-2. **Medical necessity**: Does the diagnosis justify the treatment, tests, and medicines?
-3. **Coverage verification**: Is the condition/service covered or excluded under the policy?
-4. **Fraud detection**: Flag any suspicious patterns from the fraud indicators list.
-
-## YOUR CONSTRAINTS (from the rule engine — do not override):
-- `rule_engine_findings.hard_rejections`: Definitive. Include every code in `rejection_reasons`.
-- `rule_engine_findings.amount_analysis.max_approvable`: The computed ceiling. Never set `approved_amount` higher than this value.
-- `rule_engine_findings.deductions`: Already calculated. Carry them into the `deductions` field.
-- `rule_engine_findings.pre_auth_flags`: Tests requiring pre-authorization — flag if not confirmed.
-- `rule_engine_findings.suggested_decision`: The deterministic baseline decision. Rules:
-  - Copay is a normal cost-share — a claim with copay deductions is still APPROVED, NOT partial.
-  - PARTIAL applies only when (a) amounts were capped by limits, or (b) you determine that SOME treatments/items are covered while others are excluded or not medically necessary.
-  - You may DOWNGRADE the suggested decision (APPROVED -> PARTIAL -> REJECTED -> MANUAL_REVIEW) based on coverage, medical necessity, or fraud judgment.
-  - You may NOT UPGRADE it (e.g. never return APPROVED when suggested_decision is PARTIAL because of a limit cap).
-
-## ADJUDICATION RULES
-```json
-{_rules}
-```
-
-Return a JSON object with ALL of these fields:
-- claim_id (string)
-- decision: "APPROVED", "REJECTED", "PARTIAL", or "MANUAL_REVIEW"
-- approved_amount (number — must not exceed rule_engine_findings.amount_analysis.max_approvable)
-- rejection_reasons (array of rejection codes — ONLY populate for decision="REJECTED". Must be empty [] for APPROVED, PARTIAL, and MANUAL_REVIEW. For REJECTED, include all codes from rule_engine_findings.hard_rejections)
-- confidence_score (number 0.0–1.0)
-- notes (string)
-- next_steps (string)
-"""
-
-
-def _build_system_prompt(policy_context: dict) -> str:
-    """Append the graph-retrieved policy context to the static base prompt."""
-    return (
-        _ADJUDICATION_BASE_PROMPT
-        + "\n\n## RELEVANT POLICY TERMS (retrieved from policy graph for this claim)\n"
-        + "```json\n"
-        + json.dumps(policy_context, indent=2)
-        + "\n```"
-    )
 
 # Endpoints
 
@@ -255,13 +140,6 @@ def adjudicate_documents(
         "pharmacy_bill": read(pharmacy_bill),
     }
 
-    agent_config = {
-        "prescription": (PRESCRIPTION_PROMPT, ExtractedPrescription),
-        "medical_bill": (MEDICAL_BILL_PROMPT, ExtractedMedicalBill),
-        "diagnostic_report": (DIAGNOSTIC_PROMPT, ExtractedDiagnosticReport),
-        "pharmacy_bill": (PHARMACY_BILL_PROMPT, ExtractedPharmacyBill),
-    }
-
     # Run extraction agents in parallel
 
     uploaded_files = {k: v for k, v in files.items() if v is not None}
@@ -311,41 +189,21 @@ def adjudicate_documents(
         claimed_amount=claimed_amount,
     )
 
-    # Adjudication reasoning via LLM
+    # Adjudication via multi-agent LangGraph (coverage / necessity / validity /
+    # fraud specialists run in parallel, then a synthesis node merges them with
+    # the deterministic rule-engine findings).
 
     # Query Neo4j for only the policy nodes relevant to this claim
     policy_context = graph_store.query_relevant_policy(extraction_results)
-    system_prompt = _build_system_prompt(policy_context)
 
     claim_id = f"CLM_{int(time.time() * 1000) % 100000:05d}"
-    adjudication_input = {
-        "claim_id": claim_id,
-        "member_id": member_id,
-        "member_join_date": resolved_join_date or None,
-        "member_claimed_amount": claimed_amount or None,
-        "extracted_documents": extraction_results.model_dump(exclude_none=True),
-        "rule_engine_findings": rule_findings,
-    }
-
     try:
-        response = client.models.generate_content(
-            model="gemini-2.5-flash",
-            contents=(
-                "Adjudicate this OPD claim. The rule_engine_findings contain all deterministic "
-                "checks already evaluated. Your role is to assess document validity, medical "
-                "necessity, coverage, and fraud — then produce the final decision.\n\n"
-                f"```json\n{json.dumps(adjudication_input, indent=2)}\n```"
-            ),
-            config=types.GenerateContentConfig(
-                system_instruction=system_prompt,
-                response_mime_type="application/json",
-                temperature=0,
-            ),
+        decision, agent_reports = run_adjudication(
+            claim_id=claim_id,
+            extracted_documents=extraction_results.model_dump(exclude_none=True),
+            policy_context=policy_context,
+            rule_findings=rule_findings,
         )
-        resp_text = response.text if getattr(response, "text", None) is not None else None
-        if resp_text is None:
-            raise HTTPException(status_code=500, detail="Empty response from model")
-        decision = AdjudicationDecision.model_validate_json(resp_text)
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
@@ -372,4 +230,5 @@ def adjudicate_documents(
         extractions=extraction_results,
         decision=decision,
         policy_context=policy_context,
+        agent_reports=agent_reports,
     )

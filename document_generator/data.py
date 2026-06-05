@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import random
 from dataclasses import dataclass, field
 
@@ -220,6 +221,76 @@ def amount_in_words(amount: int) -> str:
     if rest:
         parts.append(three(rest))
     return " ".join(parts).strip() + " Rupees Only"
+
+
+# ── Bill layout templates ─────────────────────────────────────────────────────
+
+# Each hospital deterministically maps to ONE bill template (by a stable hash of
+# its name), so the same hospital always renders with the same structure while
+# different hospitals look visibly distinct — exercising the extraction agent
+# against varied invoice formats rather than one fixed layout.
+_BILL_TEMPLATE_SPECS = {
+    "classic": {
+        "header_align": "center",
+        "show_gst": True,
+        "caption": None,
+        "patient_label": "Patient Details:",
+        "col_header": ("PARTICULARS", "AMOUNT (Rs.)"),
+        "numbered": False,
+        "total_label": "TOTAL",
+        "amount_fmt": "comma",       # 1,500
+        "footer": "Authorized Signatory & Stamp",
+    },
+    "compact": {
+        "header_align": "left",
+        "show_gst": False,
+        "caption": None,
+        "patient_label": "Bill To:",
+        "col_header": ("Description", "Charges (INR)"),
+        "numbered": False,
+        "total_label": "Net Payable",
+        "amount_fmt": "rupee",       # Rs. 1,500
+        "footer": "For {hospital}",
+    },
+    "itemised": {
+        "header_align": "center",
+        "show_gst": True,
+        "caption": "TAX INVOICE",
+        "patient_label": "Patient:",
+        "col_header": ("SR  PARTICULARS", "AMOUNT"),
+        "numbered": True,
+        "total_label": "GRAND TOTAL",
+        "amount_fmt": "decimal",     # 1,500.00
+        "footer": "Authorized Signatory & Stamp",
+    },
+}
+
+_BILL_TEMPLATE_ORDER = ("classic", "compact", "itemised")
+
+# Plausible line items shown as a struck-through CANCELLED row (never summed).
+CANCELLED_ITEM_POOL = [
+    "Lipid Profile", "Vitamin D (25-OH)", "X-Ray Chest", "ECG",
+    "Urine Routine", "Thyroid Profile",
+]
+
+
+def bill_template_spec(hospital_name: str) -> dict:
+    """Deterministically pick a bill template spec from the hospital name."""
+    h = int(hashlib.md5((hospital_name or "").encode("utf-8")).hexdigest(), 16)
+    return _BILL_TEMPLATE_SPECS[_BILL_TEMPLATE_ORDER[h % len(_BILL_TEMPLATE_ORDER)]]
+
+
+def fmt_amount(amount: int, style: str = "comma") -> str:
+    """Format a rupee amount according to a template's amount style."""
+    neg = amount < 0
+    a = abs(int(amount))
+    if style == "rupee":
+        s = f"Rs. {a:,}"
+    elif style == "decimal":
+        s = f"{a:,}.00"
+    else:  # comma
+        s = f"{a:,}"
+    return f"-{s}" if neg else s
 
 
 # ── Coherent claim context shared across a 4-document set ─────────────────────

@@ -17,7 +17,7 @@ num = 0
 rejection_codes_num = 0
 rejection_codes_denom = 0
 
-for test_case in test_cases["test_cases"][0:1]:
+for test_case in test_cases["test_cases"][9:]:
     case_id = test_case["case_id"].lower()
     prescription = "../generated_documents/test_cases/{case_id}/prescription.png".format(case_id=case_id)
     bill = "../generated_documents/test_cases/{case_id}/medical_bill.png".format(case_id=case_id)
