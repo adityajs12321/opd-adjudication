@@ -8,6 +8,42 @@ approved amount, rejection codes, confidence score, and step-by-step reasoning.
 
 Documentation is in the [Docs](https://github.com/adityajs12321/opd-adjudication/tree/main/docs) folder
 
+## Features
+
+**Adjudication**
+- **Multi-document claim intake** — upload a prescription, medical bill, diagnostic report, and
+  pharmacy bill (images or PDF); a prescription or medical bill is mandatory.
+- **AI document extraction** — each document is parsed by Gemini into a structured model
+  (doctor, registration, diagnosis, line items, amounts, medicines, tests, etc.), with
+  retry-with-backoff so a rate-limited extraction is retried rather than mistaken for an
+  illegible document.
+- **Hybrid decision engine** — a deterministic rule engine handles everything numeric/date-based;
+  four LLM specialist agents (Coverage, Medical Necessity, Document Validity, Fraud) run in
+  parallel and a Synthesis node merges their findings with the rule-engine output.
+- **Deterministic amounts** — the LLM decides the verdict; the approved rupee figure is computed
+  in code and can never exceed `max_approvable` or the actual billed total.
+- **Policy-aware retrieval** — the policy is stored as a Neo4j graph; only the relevant slice is
+  retrieved per claim and shown in the UI.
+- **Structured decisions** — every claim returns `APPROVED | REJECTED | PARTIAL | MANUAL_REVIEW`
+  with approved amount, rejection codes, confidence score, notes, and next steps.
+
+**Policy enforcement**
+- Per-claim, annual, and category sub-limits; consultation copay; minimum-claim amount.
+- Initial and condition-specific waiting periods; 30-day submission deadline.
+- Pre-authorization checks (MRI / CT) and duplicate-claim detection.
+- Exclusion cascade — if a base treatment is excluded, its consultation, tests, and medicines
+  are excluded with it.
+
+**Members & data**
+- **Create members from the UI** — a "New Member" modal posts to `POST /members`
+  (member ID, name, join date, relationship) and pre-fills the claim form on success.
+- Member eligibility and join-date driven waiting periods; claims and documents persisted in
+  PostgreSQL.
+
+**Frontend UX**
+- Drag-to-click upload boxes with per-document status, collapsible extracted-data cards, a
+  retrieved-policy-terms panel, and a decision banner with confidence bar and computed copay.
+
 ## How it works
 
 The adjudication pipeline is a hybrid of deterministic rules and LLM judgment:
@@ -142,8 +178,7 @@ Every adjudication returns:
 ## Testing
 
 `test_cases.json` contains 10 canonical scenarios (approvals, partial approvals, limit/waiting-period
-rejections, excluded treatments, pre-auth, fraud review). They are selectable from the UI's
-**Load test case** dropdown to verify adjudication behavior without filling the form manually.
+rejections, excluded treatments, pre-auth, fraud review) used to verify adjudication behavior.
 
 ## Deployment
 
