@@ -21,10 +21,4 @@ services:
       - key: FRONTEND_URLS
         sync: false          # https://your-app.vercel.app
       - key: DATABASE_URL
-        fromDatabase:
-          name: plum-opd-db
-          property: connectionString
-
-databases:
-  - name: plum-opd-db
-    plan: free
+        sync: false          # Supabase Session pooler connection string
