@@ -96,6 +96,11 @@ frontend/
   app/                  # page.tsx (upload form + results), layout, globals.css
   lib/types.ts          # TypeScript mirrors of the Pydantic models
   package.json
+document_generator/     # Mock document generator (PNG/PDF + ground-truth JSON)
+  generator.py          # PNG generators + batch/claim/test-case helpers
+  pdf_generator.py      # Text-based PDF generators (reportlab)
+  data.py               # Sample pools, ClaimContext, bill-layout templates
+  README.md             # Full generator docs
 policy_terms.json       # Coverage limits, sub-limits, exclusions, network hospitals
 adjudication_rules.json # Adjudication logic + rejection codes (read by backend)
 adjudication_rules.md   # Human-readable source for the rules
@@ -179,6 +184,41 @@ Every adjudication returns:
 
 `test_cases.json` contains 10 canonical scenarios (approvals, partial approvals, limit/waiting-period
 rejections, excluded treatments, pre-auth, fraud review) used to verify adjudication behavior.
+
+## Document generator
+
+`document_generator/` is a standalone package that produces realistic mock claim documents
+to test the extraction + adjudication pipeline end-to-end without hand-collecting real paperwork.
+See [`document_generator/README.md`](document_generator/README.md) for full details.
+
+**Features**
+- **Four document types** — prescription, medical bill/invoice, diagnostic report, pharmacy bill.
+- **PNG and PDF output** — raster PNGs with visual OCR stressors, or real selectable-text PDFs
+  (reportlab); `--format both` emits both with identical data so they share one ground-truth JSON.
+- **Ground-truth sidecars** — every document gets a `*.json` mirroring `backend/models.py`, so you
+  can diff Gemini's extraction against exactly what was printed.
+- **Three generation modes** — randomized standalone documents (`batch`), a coherent 4-document
+  claim set with shared patient/doctor/diagnosis (`claim`), or a prescription + bill for each
+  scenario in `test_cases.json` so the documents match the expected decision (`testcases`).
+- **Realism variations** — handwritten / multilingual headers, fading, blur, skew, noise, JPEG
+  artifacts, stamps, signatures, pen corrections, truncation; bills also show cancelled items and
+  part payments (total-preserving) plus multiple-patient and refund edge cases.
+- **Per-hospital bill layouts** — each medical bill renders in one of three structurally distinct
+  templates (`classic` / `compact` / `itemised`), chosen deterministically from the hospital name,
+  to exercise extraction against varied invoice formats.
+
+**Usage**
+
+```bash
+pip install -r document_generator/requirements.txt
+
+python -m document_generator batch --count 25 --format both          # 25 random documents
+python -m document_generator claim --format pdf                      # one coherent claim set
+python -m document_generator testcases --format both                 # docs for every test case
+python -m document_generator testcases --cases TC002 TC005           # only specific cases
+python -m document_generator single --type prescription \
+    --variations handwritten stamp signature                         # one document, chosen variations
+```
 
 ## Deployment
 
