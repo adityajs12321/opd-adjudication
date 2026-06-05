@@ -6,6 +6,7 @@ export interface ExtractedPrescription {
   patient_name: string;
   consultation_date: string;
   diagnosis: string;
+  canonical_conditions: string[];
   medicines_prescribed: string[];
   tests_advised: string[];
   procedures: string[];
@@ -63,15 +64,28 @@ export interface AdjudicationDecision {
   confidence_score: number;
   notes: string;
   next_steps: string;
-  reasoning: string;
-  cashless_approved?: boolean;
+}
+
+export interface PolicyCoverage {
+  sub_limit?: number;
+  copay_percentage?: number;
   network_discount?: number;
-  deductions?: Record<string, number>;
-  rejected_items?: string[];
-  flags?: string[];
+  covered?: boolean;
+  covered_items?: string[];
+  [key: string]: unknown;
+}
+
+export interface PolicyContext {
+  limits?: { per_claim: number; annual: number; family_floater: number };
+  claim_requirements?: { submission_deadline_days: number; minimum_claim_amount: number };
+  exclusions?: string[];
+  coverage?: Record<string, PolicyCoverage>;
+  waiting_periods?: Record<string, number>;
+  network_hospitals?: string[];
 }
 
 export interface DocumentAdjudicationResponse {
   extractions: ExtractionResults;
   decision: AdjudicationDecision;
+  policy_context: PolicyContext;
 }

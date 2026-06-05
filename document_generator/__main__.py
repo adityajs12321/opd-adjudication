@@ -7,7 +7,7 @@ from pathlib import Path
 
 from .generator import (
     ALL_VARIATIONS, _GENERATORS, _get_pdf_generators, _save,
-    generate_batch, generate_claim_set,
+    generate_batch, generate_claim_set, generate_test_cases,
 )
 
 _FORMAT_CHOICES = ["png", "pdf", "both"]
@@ -41,6 +41,16 @@ def main(argv: list[str] | None = None) -> None:
     s.add_argument("--format", choices=_FORMAT_CHOICES, default="png",
                    help="output format: png (default), pdf, or both")
 
+    tc = sub.add_parser("testcases",
+                        help="generate prescription + bill for each test_cases.json entry")
+    tc.add_argument("--out", default="generated_documents/test_cases")
+    tc.add_argument("--seed", type=int, default=42,
+                    help="base seed (each case gets base_seed + case_index)")
+    tc.add_argument("--format", choices=_FORMAT_CHOICES, default="png",
+                    help="output format: png (default), pdf, or both")
+    tc.add_argument("--cases", nargs="*", default=None,
+                    help="specific case ids to generate, e.g. TC002 TC005 (default: all)")
+
     args = p.parse_args(argv)
 
     if args.cmd == "batch":
@@ -52,6 +62,16 @@ def main(argv: list[str] | None = None) -> None:
         ctx = m["claim_context"]
         print(f"Wrote {args.format.upper()} claim for {ctx['patient_name']} "
               f"({ctx['diagnosis']}) to {args.out}/")
+
+    elif args.cmd == "testcases":
+        m = generate_test_cases(args.out, base_seed=args.seed, fmt=args.format,
+                                case_ids=args.cases)
+        n = len(m["test_cases"])
+        docs_per_case = sum(len(tc["documents"]) for tc in m["test_cases"])
+        print(f"Wrote {docs_per_case} documents for {n} test cases to {args.out}/ (+ manifest.json)")
+        for tc in m["test_cases"]:
+            doc_labels = ", ".join(tc["documents"].keys())
+            print(f"  {tc['case_id']}: {tc['case_name']} [{tc['expected_decision']}] — {doc_labels}")
 
     elif args.cmd == "single":
         rng = random.Random(args.seed)

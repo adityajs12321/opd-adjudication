@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, model_validator
 from typing import Literal, Optional
 
 
@@ -10,6 +10,7 @@ class ExtractedPrescription(BaseModel):
     patient_name: str = ""
     consultation_date: str = ""
     diagnosis: str = ""
+    canonical_conditions: list[str] = []   # normalised from diagnosis, e.g. ["diabetes"]
     medicines_prescribed: list[str] = []
     tests_advised: list[str] = []
     procedures: list[str] = []
@@ -67,17 +68,18 @@ class AdjudicationDecision(BaseModel):
     confidence_score: float
     notes: str = ""
     next_steps: str = ""
-    reasoning: str = ""
-    cashless_approved: Optional[bool] = None
-    network_discount: Optional[float] = None
-    deductions: Optional[dict[str, float]] = None
-    rejected_items: Optional[list[str]] = None
-    flags: Optional[list[str]] = None
+
+    @model_validator(mode="after")
+    def clear_rejection_reasons_for_non_rejected(self):
+        if self.decision != "REJECTED":
+            self.rejection_reasons = []
+        return self
 
 
 class DocumentAdjudicationResponse(BaseModel):
     extractions: ExtractionResults
     decision: AdjudicationDecision
+    policy_context: dict = {}
 
 
 # ── Member models ─────────────────────────────────────────────────────────────

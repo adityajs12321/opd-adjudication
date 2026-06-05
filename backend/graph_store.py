@@ -266,28 +266,38 @@ def query_relevant_policy(extractions: ExtractionResults) -> dict:
     if bill:
         if bill.consultation_fee > 0:
             relevant_categories.add("consultation_fees")
-        if bill.procedure_charges > 0 or bill.other_charges > 0:
+        if bill.other_charges > 0:
             relevant_categories.add("diagnostic_tests")
     if pharmacy:
         relevant_categories.add("pharmacy")
     if diagnostic:
         relevant_categories.add("diagnostic_tests")
+    if rx and rx.tests_advised:
+        relevant_categories.add("diagnostic_tests")
 
     diagnosis = (rx.diagnosis if rx else "").lower()
     medicines_text = " ".join(rx.medicines_prescribed if rx else []).lower()
-    context_text = f"{diagnosis} {medicines_text}"
+    procedures_text = " ".join(rx.procedures if rx else []).lower()
+    doctor_name = (rx.doctor_name if rx else "").lower()
+    doctor_reg = (rx.doctor_registration if rx else "").lower()
+    context_text = f"{diagnosis} {medicines_text} {procedures_text} {doctor_name} {doctor_reg}"
 
     keyword_to_category = {
         "dental": ["dental", "tooth", "teeth", "gum", "oral", "cavity", "root canal"],
         "vision": ["eye", "vision", "optical", "glasses", "cataract", "myopia", "retina"],
-        "alternative_medicine": ["ayurveda", "homeopathy", "unani"],
+        "alternative_medicine": [
+            "ayurveda", "ayur", "homeopathy", "homeo", "unani", "siddha", "naturo",
+            "panchakarma", "vaidya", "herbal", "alternative",
+        ],
     }
     for category, keywords in keyword_to_category.items():
         if any(kw in context_text for kw in keywords):
             relevant_categories.add(category)
 
-    condition_keywords = ["diabetes", "hypertension", "joint"]
-    relevant_conditions = {c for c in condition_keywords if c in diagnosis}
+    # Use canonical_conditions (LLM-normalised) for reliable waiting period lookup
+    canonical = {c.lower() for c in (rx.canonical_conditions if rx else [])}
+    condition_keywords = ["diabetes", "hypertension", "joint_replacement"]
+    relevant_conditions = {c for c in condition_keywords if c in canonical}
     hospital_name = (bill.hospital_name or "") if bill else ""
 
     # ── Filter in-memory cache — zero Neo4j round-trips at claim time ─────────

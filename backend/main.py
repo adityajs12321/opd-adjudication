@@ -60,7 +60,8 @@ Extract all information from this prescription and return JSON with these exact 
   "doctor_registration": "registration number like KA/45678/2015",
   "patient_name": "patient full name",
   "consultation_date": "YYYY-MM-DD",
-  "diagnosis": "primary diagnosis",
+  "diagnosis": "primary diagnosis exactly as written",
+  "canonical_conditions": ["normalised condition names — map the diagnosis to any that apply from this fixed list: diabetes, hypertension, joint_replacement, maternity, pre_existing_disease. Use the exact strings from the list. Examples: 'Type 2 DM' -> ['diabetes'], 'HTN' -> ['hypertension'], 'T2DM with hypertension' -> ['diabetes', 'hypertension']. Empty array if none apply."],
   "medicines_prescribed": ["Medicine Name Dose - Duration"],
   "tests_advised": ["Test Name"],
   "procedures": ["procedure name if any"],
@@ -131,6 +132,11 @@ non-deterministic aspects that require judgment:
 - `rule_engine_findings.amount_analysis.max_approvable`: The computed ceiling. Never set `approved_amount` higher than this value.
 - `rule_engine_findings.deductions`: Already calculated. Carry them into the `deductions` field.
 - `rule_engine_findings.pre_auth_flags`: Tests requiring pre-authorization — flag if not confirmed.
+- `rule_engine_findings.suggested_decision`: The deterministic baseline decision. Rules:
+  - Copay is a normal cost-share — a claim with copay deductions is still APPROVED, NOT partial.
+  - PARTIAL applies only when (a) amounts were capped by limits, or (b) you determine that SOME treatments/items are covered while others are excluded or not medically necessary.
+  - You may DOWNGRADE the suggested decision (APPROVED -> PARTIAL -> REJECTED -> MANUAL_REVIEW) based on coverage, medical necessity, or fraud judgment.
+  - You may NOT UPGRADE it (e.g. never return APPROVED when suggested_decision is PARTIAL because of a limit cap).
 
 ## ADJUDICATION RULES
 ```json
@@ -141,16 +147,11 @@ Return a JSON object with ALL of these fields:
 - claim_id (string)
 - decision: "APPROVED", "REJECTED", "PARTIAL", or "MANUAL_REVIEW"
 - approved_amount (number — must not exceed rule_engine_findings.amount_analysis.max_approvable)
-- rejection_reasons (array — must include all codes from rule_engine_findings.hard_rejections)
+- rejection_reasons (array of rejection codes — ONLY populate for decision="REJECTED". Must be empty [] for APPROVED, PARTIAL, and MANUAL_REVIEW. For REJECTED, include all codes from rule_engine_findings.hard_rejections)
 - confidence_score (number 0.0–1.0)
 - notes (string)
 - next_steps (string)
-- reasoning (string, step-by-step: rule engine findings → your judgment → final decision)
-- deductions (object like {{"copay": 150}}, include rule engine deductions)
-- network_discount (number, omit if not applicable)
-- cashless_approved (boolean, only for cashless requests)
-- rejected_items (array of strings, omit if none)
-- flags (array of strings for fraud/review flags, omit if none)"""
+"""
 
 
 def _build_system_prompt(policy_context: dict) -> str:
@@ -176,6 +177,7 @@ def run_rule_engine(
     member_active: bool,
     annual_spend: float,
     is_duplicate: bool,
+    claimed_amount: float = 0,
 ) -> dict:
     policy = _policy_data
     limits = policy["coverage_details"]
@@ -218,11 +220,15 @@ def run_rule_engine(
 
     # ── Documentation: missing documents ─────────────────────────────────────
 
-    # Pharmacy bill requires a prescription per policy
-    if pharmacy is not None and rx is None:
+    # A prescription from a registered doctor is required for every OPD claim.
+    if rx is None:
+        if pharmacy is not None:
+            reason = "Pharmacy bill submitted without a prescription. A valid prescription is required to process pharmacy claims."
+        else:
+            reason = "No prescription was uploaded. A valid prescription from a registered doctor is required to process the claim."
         hard_rejections.append({
             "code": "MISSING_DOCUMENTS",
-            "reason": "Pharmacy bill submitted without a prescription. A valid prescription is required to process pharmacy claims.",
+            "reason": reason,
         })
 
     # Prescription without any financial document — no amount to approve
@@ -287,21 +293,24 @@ def run_rule_engine(
             })
 
     # ── Documentation: doctor registration format ─────────────────────────────
+    # Only validate when a prescription was uploaded; an absent prescription is
+    # already reported as MISSING_DOCUMENTS above.
 
-    reg = (rx.doctor_registration if rx else "") or ""
-    if not reg:
-        hard_rejections.append({
-            "code": "DOCTOR_REG_INVALID",
-            "reason": "No doctor registration number present on the prescription.",
-        })
-    elif not _DOCTOR_REG_RE.match(reg.strip()):
-        hard_rejections.append({
-            "code": "DOCTOR_REG_INVALID",
-            "reason": (
-                f"Doctor registration number '{reg}' does not match the required format "
-                "[StateCode]/[Number]/[Year] (e.g. KA/45678/2015)."
-            ),
-        })
+    if rx is not None:
+        reg = (rx.doctor_registration or "").strip()
+        if not reg:
+            hard_rejections.append({
+                "code": "DOCTOR_REG_INVALID",
+                "reason": "No doctor registration number present on the prescription.",
+            })
+        elif not _DOCTOR_REG_RE.match(reg):
+            hard_rejections.append({
+                "code": "DOCTOR_REG_INVALID",
+                "reason": (
+                    f"Doctor registration number '{reg}' does not match the required format "
+                    "[StateCode]/[Number]/[Year] (e.g. KA/45678/2015)."
+                ),
+            })
 
     # ── Collect raw amounts ───────────────────────────────────────────────────
 
@@ -393,23 +402,28 @@ def run_rule_engine(
     per_claim_limit = limits["per_claim_limit"]  # 5000
     non_consult_bill = round(procedure_charges + other_charges, 2)
     subtotal = round(approved_consult + non_consult_bill + capped_pharmacy, 2)
-    capped_subtotal = round(min(subtotal, per_claim_limit), 2)
 
-    if subtotal > per_claim_limit:
-        warnings.append({
+    per_claim_exceeded = False
+    if claimed_amount > 0 and claimed_amount > per_claim_limit:
+        hard_rejections.append({
             "code": "PER_CLAIM_EXCEEDED",
             "reason": (
-                f"Approved subtotal ₹{subtotal:.0f} exceeds per-claim limit "
-                f"₹{per_claim_limit}. Capped at ₹{per_claim_limit}."
+                f"Claimed amount ₹{claimed_amount:.0f} exceeds the per-claim limit "
+                f"of ₹{per_claim_limit}."
             ),
         })
+        per_claim_exceeded = True
+
+    capped_subtotal = round(min(subtotal, per_claim_limit), 2)
 
     # ── Annual limit ──────────────────────────────────────────────────────────
 
     annual_limit = limits["annual_limit"]  # 50000
     annual_remaining = round(annual_limit - annual_spend, 2)
 
-    if annual_spend >= annual_limit:
+    if per_claim_exceeded:
+        max_approvable = 0.0
+    elif annual_spend >= annual_limit:
         hard_rejections.append({
             "code": "ANNUAL_LIMIT_EXCEEDED",
             "reason": (
@@ -481,9 +495,9 @@ def run_rule_engine(
                             ),
                         })
 
-                    diagnosis = (rx.diagnosis if rx else "").lower()
+                    canonical = [c.lower() for c in (rx.canonical_conditions if rx else [])]
                     for condition, wait_days in policy["waiting_periods"]["specific_ailments"].items():
-                        if condition.lower() in diagnosis:
+                        if condition.lower() in canonical:
                             satisfied = days_since_join >= wait_days
                             waiting_period_checks.append({
                                 "condition": condition,
@@ -531,6 +545,21 @@ def run_rule_engine(
         if is_network:
             amount_analysis["network_discount_pct"] = consult_cfg["network_discount"]  # 20
 
+    # ── Suggested decision ────────────────────────────────────────────────────
+    # Copay is a standard cost-share — it does NOT make a claim partial. A claim
+    # is partial only when amounts are capped by limits (sub-limit / per-claim /
+    # annual). Incomplete treatment coverage (some items excluded) is the LLM's
+    # call, so it may downgrade APPROVED -> PARTIAL, but never upgrade.
+    limit_codes = {"SUB_LIMIT_EXCEEDED", "PER_CLAIM_EXCEEDED", "ANNUAL_LIMIT_EXCEEDED"}
+    amount_capped_by_limits = any(w["code"] in limit_codes for w in warnings)
+
+    if hard_rejections or max_approvable == 0:
+        suggested_decision = "REJECTED"
+    elif amount_capped_by_limits:
+        suggested_decision = "PARTIAL"
+    else:
+        suggested_decision = "APPROVED"
+
     return {
         "hard_rejections": hard_rejections,
         "warnings": warnings,
@@ -539,6 +568,7 @@ def run_rule_engine(
         "waiting_period_checks": waiting_period_checks,
         "network_status": network_status,
         "amount_analysis": amount_analysis,
+        "suggested_decision": suggested_decision,
     }
 
 
@@ -591,6 +621,7 @@ def get_member(member_id: str):
 def adjudicate_documents(
     member_id: str = Form(...),
     member_join_date: str = Form(""),
+    claimed_amount: float = Form(0),
     prescription: UploadFile | None = File(None),
     medical_bill: UploadFile | None = File(None),
     diagnostic_report: UploadFile | None = File(None),
@@ -607,8 +638,7 @@ def adjudicate_documents(
 
     # Use DB join_date if available; fall back to form value
     resolved_join_date = (
-        member["join_date"].strftime("%Y-%m-%d")
-        if member and member.get("join_date")
+        member["join_date"] if member and member.get("join_date")
         else member_join_date
     )
 
@@ -696,6 +726,7 @@ def adjudicate_documents(
         member_active=member_active,
         annual_spend=annual_spend,
         is_duplicate=is_duplicate,
+        claimed_amount=claimed_amount,
     )
 
     # ── Adjudication LLM call ─────────────────────────────────────────────────
@@ -709,6 +740,7 @@ def adjudicate_documents(
         "claim_id": claim_id,
         "member_id": member_id,
         "member_join_date": resolved_join_date or None,
+        "member_claimed_amount": claimed_amount or None,
         "extracted_documents": extraction_results.model_dump(exclude_none=True),
         "rule_engine_findings": rule_findings,
     }
@@ -725,6 +757,7 @@ def adjudicate_documents(
             config=types.GenerateContentConfig(
                 system_instruction=system_prompt,
                 response_mime_type="application/json",
+                temperature=0,
             ),
         )
         decision = AdjudicationDecision.model_validate_json(response.text)
@@ -747,14 +780,11 @@ def adjudicate_documents(
         )
         db.save_claim_documents(
             claim_id=claim_id,
-            documents={
-                k: v.model_dump() if v else None
-                for k, v in extraction_results.model_dump().items()
-                if v is not None
-            },
+            documents=extraction_results.model_dump(exclude_none=True),
         )
 
     return DocumentAdjudicationResponse(
         extractions=extraction_results,
         decision=decision,
+        policy_context=policy_context,
     )

@@ -248,6 +248,62 @@ class ClaimContext:
     family_members: list[str] = field(default_factory=list)
 
     @classmethod
+    def from_test_case(cls, tc: dict, rng: "random.Random") -> "ClaimContext":
+        """Build a ClaimContext from a test_cases.json entry."""
+        from datetime import datetime
+        inp = tc["input_data"]
+        docs = inp.get("documents", {})
+        rx = docs.get("prescription", {})
+        bill = docs.get("bill", {})
+
+        raw_date = inp.get("treatment_date", "")
+        if raw_date:
+            d = datetime.strptime(raw_date, "%Y-%m-%d")
+            consultation_date = d.strftime("%d/%m/%Y")
+            follow_up_date = f"{min(d.day + 7, 28):02d}/{d.month:02d}/{d.year}"
+        else:
+            day, month = rng.randint(1, 28), rng.randint(1, 12)
+            consultation_date = f"{day:02d}/{month:02d}/2024"
+            follow_up_date = f"{min(day + 7, 28):02d}/{month:02d}/2024"
+
+        medicines = rx.get("medicines_prescribed") or rx.get("medicines") or []
+        tests = rx.get("tests_prescribed") or bill.get("test_names") or []
+
+        procedure = None
+        procs = rx.get("procedures")
+        if procs:
+            procedure = ", ".join(procs) if isinstance(procs, list) else procs
+        elif rx.get("treatment"):
+            procedure = rx["treatment"]
+
+        complaints_pool = [
+            "Fever since 3 days", "Body ache", "Headache", "Cough and cold",
+            "Loose motions", "Fatigue", "Loss of appetite", "Joint pain",
+        ]
+        # Use complaints supplied in the test case if present, else sample the pool.
+        complaints = rx.get("complaints") or rng.sample(complaints_pool, k=rng.randint(2, 3))
+
+        return cls(
+            patient_name=inp["member_name"],
+            age=rng.randint(25, 65),
+            sex=rng.choice(["Male", "Female"]),
+            patient_address=address(rng),
+            doctor_name=rx.get("doctor_name") or rng.choice(DOCTOR_NAMES),
+            doctor_qualification=rng.choice(QUALIFICATIONS),
+            doctor_reg=rx.get("doctor_reg") or reg_number(rng),
+            clinic_name=inp.get("hospital") or rng.choice(CLINIC_NAMES),
+            clinic_address=address(rng),
+            clinic_phone=phone(rng),
+            diagnosis=rx.get("diagnosis") or "General consultation",
+            complaints=complaints,
+            medicines=medicines,
+            tests=tests,
+            procedure=procedure,
+            consultation_date=consultation_date,
+            follow_up_date=follow_up_date,
+        )
+
+    @classmethod
     def random(cls, rng: random.Random) -> "ClaimContext":
         diagnosis, meds, tests, proc = rng.choice(CONDITIONS)
         sex = rng.choice(["Male", "Female"])

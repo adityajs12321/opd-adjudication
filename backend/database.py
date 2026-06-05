@@ -70,13 +70,20 @@ def init_db():
 
 # ── Members ───────────────────────────────────────────────────────────────────
 
+def _serialize_member(row) -> dict:
+    d = dict(row)
+    if d.get("join_date") and not isinstance(d["join_date"], str):
+        d["join_date"] = d["join_date"].isoformat()
+    return d
+
+
 def get_member(member_id: str) -> Optional[dict]:
     conn = _conn()
     try:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute("SELECT * FROM members WHERE member_id = %s", (member_id,))
             row = cur.fetchone()
-            return dict(row) if row else None
+            return _serialize_member(row) if row else None
     finally:
         _release(conn)
 
@@ -97,7 +104,7 @@ def create_member(member_id: str, name: str, join_date: str, relationship: str =
                 (member_id, name, join_date, relationship),
             )
             conn.commit()
-            return dict(cur.fetchone())
+            return _serialize_member(cur.fetchone())
     finally:
         _release(conn)
 

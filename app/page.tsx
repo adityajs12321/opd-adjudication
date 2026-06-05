@@ -8,6 +8,7 @@ import {
   ExtractedMedicalBill,
   ExtractedPharmacyBill,
   ExtractedPrescription,
+  PolicyContext,
 } from '@/lib/types';
 
 // ── Decision badge config ─────────────────────────────────────────────────────
@@ -121,6 +122,7 @@ function UploadBox({
 export default function Home() {
   const [memberId, setMemberId] = useState('');
   const [memberJoinDate, setMemberJoinDate] = useState('');
+  const [claimedAmount, setClaimedAmount] = useState('');
 
   const prescriptionRef = useRef<HTMLInputElement>(null!);
   const medicalBillRef = useRef<HTMLInputElement>(null!);
@@ -135,7 +137,6 @@ export default function Home() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<DocumentAdjudicationResponse | null>(null);
-  const [showReasoning, setShowReasoning] = useState(false);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -151,6 +152,7 @@ export default function Home() {
     const form = new FormData();
     form.append('member_id', memberId);
     form.append('member_join_date', memberJoinDate);
+    if (claimedAmount) form.append('claimed_amount', claimedAmount);
     if (prescriptionFile) form.append('prescription', prescriptionFile);
     if (medicalBillFile) form.append('medical_bill', medicalBillFile);
     if (diagnosticFile) form.append('diagnostic_report', diagnosticFile);
@@ -165,7 +167,6 @@ export default function Home() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail ?? data.error ?? `HTTP ${res.status}`);
       setResult(data);
-      setShowReasoning(false);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unknown error');
     } finally {
@@ -186,16 +187,13 @@ export default function Home() {
           </div>
           <h1 className="text-2xl font-bold text-gray-900">Plum OPD Claim Adjudication</h1>
         </div>
-        <p className="text-gray-500 text-sm ml-11">
-          Upload your medical documents — AI agents extract data from each and adjudicate against policy PLUM_OPD_2024
-        </p>
       </div>
 
       <form onSubmit={handleSubmit} className="space-y-6">
         {/* Member info */}
         <section className="bg-white rounded-xl border border-gray-200 p-6">
           <h2 className="text-base font-semibold text-gray-800 mb-4">Member Information</h2>
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-3 gap-4">
             <div>
               <label className="block text-xs font-medium text-gray-600 mb-1">Member ID *</label>
               <input
@@ -209,13 +207,28 @@ export default function Home() {
             <div>
               <label className="block text-xs font-medium text-gray-600 mb-1">
                 Policy Join Date
-                <span className="text-gray-400 ml-1">(for waiting period check)</span>
+                <span className="text-gray-400 ml-1">(waiting period)</span>
               </label>
               <input
                 type="date"
                 className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-500"
                 value={memberJoinDate}
                 onChange={(e) => setMemberJoinDate(e.target.value)}
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">
+                Claimed Amount (₹) *
+              </label>
+              <input
+                required
+                type="number"
+                min="0"
+                step="1"
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-500"
+                value={claimedAmount}
+                onChange={(e) => setClaimedAmount(e.target.value)}
+                placeholder="e.g. 1500"
               />
             </div>
           </div>
@@ -225,7 +238,7 @@ export default function Home() {
         <section className="bg-white rounded-xl border border-gray-200 p-6">
           <h2 className="text-base font-semibold text-gray-800 mb-1">Upload Documents</h2>
           <p className="text-xs text-gray-400 mb-4">
-            A separate AI agent processes each document. At least one of the first two is required.
+            First two are mandatory.
           </p>
           <div className="grid grid-cols-2 gap-4">
             <UploadBox
@@ -307,6 +320,11 @@ export default function Home() {
             </div>
           </div>
 
+          {/* Policy context */}
+          {result.policy_context && Object.keys(result.policy_context).length > 0 && (
+            <PolicyContextCard ctx={result.policy_context} />
+          )}
+
           {/* Adjudication decision */}
           <div>
             <h2 className="text-base font-semibold text-gray-800 mb-3">Adjudication Decision</h2>
@@ -318,11 +336,23 @@ export default function Home() {
                     <p className="text-xs font-medium text-gray-500 mb-1">{decision.claim_id}</p>
                     <p className={`text-2xl font-bold ${decisionStyle.text}`}>{decisionStyle.label}</p>
                   </div>
-                  <div className="text-right">
-                    <p className="text-xs text-gray-500 mb-1">Approved Amount</p>
-                    <p className="text-2xl font-bold text-gray-900">
-                      ₹{decision.approved_amount.toLocaleString('en-IN')}
-                    </p>
+                  <div className="text-right space-y-1">
+                    {claimedAmount && (
+                      <p className="text-xs text-gray-500">
+                        Claimed ₹{Number(claimedAmount).toLocaleString('en-IN')}
+                      </p>
+                    )}
+                    <div>
+                      <p className="text-xs text-gray-500 mb-0.5">Approved Amount</p>
+                      <p className="text-2xl font-bold text-gray-900">
+                        ₹{decision.approved_amount.toLocaleString('en-IN')}
+                      </p>
+                    </div>
+                    {decision.decision !== 'REJECTED' && claimedAmount && Number(claimedAmount) > decision.approved_amount && (
+                      <p className="text-xs text-amber-700 font-medium">
+                        Copay ₹{(Number(claimedAmount) - decision.approved_amount).toLocaleString('en-IN')}
+                      </p>
+                    )}
                   </div>
                 </div>
                 <div className="mt-4">
@@ -358,69 +388,6 @@ export default function Home() {
                   </div>
                 )}
 
-                {(decision.rejected_items?.length ?? 0) > 0 && (
-                  <div>
-                    <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">
-                      Excluded Items
-                    </h3>
-                    <ul className="space-y-1">
-                      {(decision.rejected_items ?? []).map((item) => (
-                        <li key={item} className="text-sm text-gray-700 flex items-start gap-2">
-                          <span className="text-red-500 mt-0.5">×</span>
-                          {item}
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
-
-                {decision.deductions && Object.keys(decision.deductions).length > 0 && (
-                  <div>
-                    <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">
-                      Deductions
-                    </h3>
-                    <div className="flex flex-wrap gap-3">
-                      {Object.entries(decision.deductions).map(([k, v]) => (
-                        <div
-                          key={k}
-                          className="px-3 py-2 bg-amber-50 border border-amber-200 rounded-lg text-sm"
-                        >
-                          <span className="text-gray-500 capitalize">{k}: </span>
-                          <span className="font-semibold text-gray-800">
-                            ₹{v.toLocaleString('en-IN')}
-                          </span>
-                        </div>
-                      ))}
-                      {decision.network_discount ? (
-                        <div className="px-3 py-2 bg-green-50 border border-green-200 rounded-lg text-sm">
-                          <span className="text-gray-500">Network discount: </span>
-                          <span className="font-semibold text-green-700">
-                            –₹{decision.network_discount.toLocaleString('en-IN')}
-                          </span>
-                        </div>
-                      ) : null}
-                    </div>
-                  </div>
-                )}
-
-                {(decision.flags?.length ?? 0) > 0 && (
-                  <div>
-                    <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">
-                      Flags
-                    </h3>
-                    <div className="flex flex-wrap gap-2">
-                      {(decision.flags ?? []).map((f) => (
-                        <span
-                          key={f}
-                          className="px-3 py-1 bg-orange-50 text-orange-700 text-xs rounded-full border border-orange-200"
-                        >
-                          ⚠ {f}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
                 {decision.notes && (
                   <div>
                     <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">Notes</h3>
@@ -437,27 +404,126 @@ export default function Home() {
                   </div>
                 )}
 
-                <div className="border border-gray-200 rounded-lg overflow-hidden">
-                  <button
-                    type="button"
-                    onClick={() => setShowReasoning((v) => !v)}
-                    className="w-full flex items-center justify-between px-4 py-3 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
-                  >
-                    <span>View detailed reasoning</span>
-                    <span>{showReasoning ? '▲' : '▼'}</span>
-                  </button>
-                  {showReasoning && (
-                    <div className="px-4 pb-4 text-sm text-gray-600 leading-relaxed border-t border-gray-200 pt-3">
-                      {decision.reasoning}
-                    </div>
-                  )}
-                </div>
               </div>
             </div>
           </div>
         </div>
       )}
     </main>
+  );
+}
+
+// ── Policy context card ───────────────────────────────────────────────────────
+
+function PolicyContextCard({ ctx }: { ctx: PolicyContext }) {
+  const [open, setOpen] = useState(false);
+
+  const fmt = (n: number) => `₹${n.toLocaleString('en-IN')}`;
+
+  return (
+    <div className="border border-gray-200 rounded-xl overflow-hidden">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="w-full flex items-center justify-between px-4 py-3 bg-gray-50 hover:bg-gray-100 transition-colors"
+      >
+        <span className="flex items-center gap-2 text-sm font-semibold text-gray-700">
+          <span>📜</span>
+          Retrieved Policy Terms
+        </span>
+        <span className="text-gray-400 text-xs">{open ? '▲' : '▼'}</span>
+      </button>
+
+      {open && (
+        <div className="px-4 py-4 space-y-4 text-sm">
+
+          {ctx.limits && (
+            <div>
+              <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">Limits</p>
+              <div className="flex flex-wrap gap-3">
+                <span className="px-2 py-1 bg-gray-100 rounded text-gray-700">Per claim: {fmt(ctx.limits.per_claim)}</span>
+                <span className="px-2 py-1 bg-gray-100 rounded text-gray-700">Annual: {fmt(ctx.limits.annual)}</span>
+                <span className="px-2 py-1 bg-gray-100 rounded text-gray-700">Family floater: {fmt(ctx.limits.family_floater)}</span>
+              </div>
+            </div>
+          )}
+
+          {ctx.claim_requirements && (
+            <div>
+              <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">Claim Requirements</p>
+              <div className="flex flex-wrap gap-3">
+                <span className="px-2 py-1 bg-gray-100 rounded text-gray-700">Submit within {ctx.claim_requirements.submission_deadline_days} days</span>
+                <span className="px-2 py-1 bg-gray-100 rounded text-gray-700">Min amount: {fmt(ctx.claim_requirements.minimum_claim_amount)}</span>
+              </div>
+            </div>
+          )}
+
+          {ctx.coverage && Object.keys(ctx.coverage).length > 0 && (
+            <div>
+              <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Coverage Categories</p>
+              <div className="space-y-2">
+                {Object.entries(ctx.coverage).map(([name, cat]) => (
+                  <div key={name} className="border border-gray-100 rounded-lg px-3 py-2">
+                    <p className="font-medium text-gray-700 capitalize mb-1">{name.replace(/_/g, ' ')}</p>
+                    <div className="flex flex-wrap gap-x-4 gap-y-1 text-gray-500">
+                      {cat.sub_limit != null && <span>Sub-limit: {fmt(cat.sub_limit)}</span>}
+                      {cat.copay_percentage != null && <span>Copay: {cat.copay_percentage}%</span>}
+                      {cat.network_discount != null && <span>Network discount: {cat.network_discount}%</span>}
+                      {cat.covered != null && <span>{cat.covered ? 'Covered' : 'Not covered'}</span>}
+                    </div>
+                    {cat.covered_items && cat.covered_items.length > 0 && (
+                      <div className="mt-1 flex flex-wrap gap-1">
+                        {cat.covered_items.map((item) => (
+                          <span key={item} className="px-2 py-0.5 bg-green-50 text-green-700 text-xs rounded border border-green-100">{item}</span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {ctx.waiting_periods && Object.keys(ctx.waiting_periods).length > 0 && (
+            <div>
+              <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">Waiting Periods (relevant)</p>
+              <div className="flex flex-wrap gap-2">
+                {Object.entries(ctx.waiting_periods).map(([cond, days]) => (
+                  <span key={cond} className="px-2 py-1 bg-amber-50 border border-amber-100 rounded text-amber-800 text-xs">
+                    {cond.replace(/_/g, ' ')}: {days} days
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {ctx.exclusions && ctx.exclusions.length > 0 && (
+            <div>
+              <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">Exclusions</p>
+              <ul className="space-y-0.5">
+                {ctx.exclusions.map((e) => (
+                  <li key={e} className="text-gray-600 flex items-start gap-1.5">
+                    <span className="text-red-400 mt-0.5 shrink-0">×</span>{e}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {ctx.network_hospitals && ctx.network_hospitals.length > 0 && (
+            <div>
+              <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">Network Hospitals</p>
+              <div className="flex flex-wrap gap-2">
+                {ctx.network_hospitals.map((h) => (
+                  <span key={h} className="px-2 py-1 bg-blue-50 border border-blue-100 rounded text-blue-700 text-xs">{h}</span>
+                ))}
+              </div>
+            </div>
+          )}
+
+        </div>
+      )}
+    </div>
   );
 }
 

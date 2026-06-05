@@ -393,44 +393,49 @@ _BILL_XS = [0, 370]   # PARTICULARS, AMOUNT
 def generate_medical_bill_pdf(ctx: ClaimContext | None = None,
                               variations: list[str] | None = None,
                               rng: random.Random | None = None,
-                              *, edge_cases: bool = True):
+                              *, edge_cases: bool = True,
+                              line_items_override: list[tuple[str, int]] | None = None):
     from .generator import _pick_variations
     rng = rng or random.Random()
     ctx = ctx or ClaimContext.random(rng)
     variations = variations if variations is not None else _pick_variations(rng, "medical_bill")
 
-    # ── Identical rng calls to PNG generator ──────────────────────────────────
-    consultation  = rng.choice([500, 800, 1000, 1200, 1500, 2000])
-    test_items    = [(t, rng.choice([300, 450, 500, 650, 800, 1200])) for t in ctx.tests]
-    proc_items    = [(ctx.procedure, rng.choice([1500, 3000, 5000, 8000]))] if ctx.procedure else []
-    medicine_charge = rng.choice([0, 250, 450, 700, 1100])
-
     cancelled = None
     refund    = None
     is_family = False
-    if edge_cases:
-        if rng.random() < 0.12 and test_items:
-            cancelled = test_items.pop()
-        if rng.random() < 0.08:
-            refund = ("Refund - duplicate charge", -rng.choice([200, 500]))
-        if rng.random() < 0.1:
-            is_family = True
-            ctx.family_members = [ctx.patient_name, rng.choice(data.PATIENT_NAMES)]
 
-    line_items: list[tuple[str, int]] = [("Consultation Fee", consultation)]
-    line_items += [(f"  {t}", amt) for t, amt in test_items]
-    line_items += [(f"  {p}", amt) for p, amt in proc_items]
-    if medicine_charge:
-        line_items.append(("Medicines", medicine_charge))
-    if refund:
-        line_items.append(refund)
+    if line_items_override is not None:
+        line_items: list[tuple[str, int]] = list(line_items_override)
+        subtotal = sum(amt for _, amt in line_items)
+    else:
+        # ── Identical rng calls to PNG generator ──────────────────────────────
+        consultation  = rng.choice([500, 800, 1000, 1200, 1500, 2000])
+        test_items    = [(t, rng.choice([300, 450, 500, 650, 800, 1200])) for t in ctx.tests]
+        proc_items    = [(ctx.procedure, rng.choice([1500, 3000, 5000, 8000]))] if ctx.procedure else []
+        medicine_charge = rng.choice([0, 250, 450, 700, 1100])
 
-    subtotal  = sum(amt for _, amt in line_items)
-    gst       = round(subtotal * 0.18)
-    total     = subtotal + gst
+        if edge_cases:
+            if rng.random() < 0.12 and test_items:
+                cancelled = test_items.pop()
+            if rng.random() < 0.08:
+                refund = ("Refund - duplicate charge", -rng.choice([200, 500]))
+            if rng.random() < 0.1:
+                is_family = True
+                ctx.family_members = [ctx.patient_name, rng.choice(data.PATIENT_NAMES)]
+
+        line_items = [("Consultation Fee", consultation)]
+        line_items += [(f"  {t}", amt) for t, amt in test_items]
+        line_items += [(f"  {p}", amt) for p, amt in proc_items]
+        if medicine_charge:
+            line_items.append(("Medicines", medicine_charge))
+        if refund:
+            line_items.append(refund)
+        subtotal = sum(amt for _, amt in line_items)
+        # ─────────────────────────────────────────────────────────────────────
+
+    total     = subtotal
     bill_no   = data.bill_number(rng, "BILL")
     pay_mode  = rng.choice(data.PAYMENT_MODES)
-    # ─────────────────────────────────────────────────────────────────────────
 
     cv = PDFCanvas()
     cv.text(ctx.clinic_name, "serif_bold", 24, align="center", color=(30, 30, 30))
@@ -463,9 +468,7 @@ def generate_medical_bill_pdf(ctx: ClaimContext | None = None,
                _BILL_XS, "mono", 11, color=(0.59, 0.59, 0.59))
         cv.strikethrough(color=(0.59, 0.12, 0.12))
     cv.rule(dashed=True)
-    cv.row(["Sub Total", f"{subtotal:,}"], _BILL_XS, "mono_bold", 12)
-    cv.row(["GST (18%)", f"{gst:,}"],      _BILL_XS, "mono",      11)
-    cv.row(["TOTAL",     f"{total:,}"],    _BILL_XS, "mono_bold", 14, color=(25, 55, 110))
+    cv.row(["TOTAL", f"{total:,}"], _BILL_XS, "mono_bold", 14, color=(25, 55, 110))
     cv.gap(3)
     cv.text(f"Amount in Words: {data.amount_in_words(total)}", "sans", 9, color=(70, 70, 70))
     cv.gap(8)
@@ -484,6 +487,14 @@ def generate_medical_bill_pdf(ctx: ClaimContext | None = None,
     cv.text("Authorized Signatory & Stamp", "sans", 10, align="right", color=(120, 120, 120))
 
     pdf_bytes = _apply_pdf_variations(cv, variations, rng, ctx, "medical_bill")
+    if line_items_override is not None:
+        consult_fee = float(next((a for l, a in line_items if "Consultation" in l), 0))
+        proc_charges = 0.0
+        other_charges = float(sum(a for l, a in line_items if "Consultation" not in l and a > 0))
+    else:
+        consult_fee = float(consultation)
+        proc_charges = float(sum(a for _, a in proc_items))
+        other_charges = float(sum(a for _, a in test_items) + medicine_charge)
     gt = {
         "doc_type": "medical_bill",
         "format": "pdf",
@@ -493,15 +504,14 @@ def generate_medical_bill_pdf(ctx: ClaimContext | None = None,
             "bill_number": bill_no,
             "bill_date": ctx.consultation_date,
             "patient_name": ctx.patient_name,
-            "consultation_fee": float(consultation),
-            "procedure_charges": float(sum(a for _, a in proc_items)),
-            "other_charges": float(sum(a for _, a in test_items) + medicine_charge),
+            "consultation_fee": consult_fee,
+            "procedure_charges": proc_charges,
+            "other_charges": other_charges,
             "total_amount": float(total),
             "line_items": [f"{lbl.strip()}: Rs.{amt}" for lbl, amt in line_items],
             "payment_mode": pay_mode,
         },
         "extras": {
-            "subtotal": subtotal, "gst": gst,
             "cancelled_item": cancelled[0] if cancelled else None,
             "refund": refund[1] if refund else None,
             "family_members": ctx.family_members or None,
@@ -640,9 +650,7 @@ def generate_pharmacy_bill_pdf(ctx: ClaimContext | None = None,
         rows.append((str(i), med, batch, exp, str(qty), str(mrp), str(amt)))
         purchased.append(f"{med} x{qty} - Rs.{amt}")
 
-    subtotal = sum(int(r[6]) for r in rows)
-    gst = round(subtotal * 0.12)
-    net = subtotal + gst
+    net = sum(int(r[6]) for r in rows)
     # ─────────────────────────────────────────────────────────────────────────
 
     cv = PDFCanvas()
@@ -663,9 +671,7 @@ def generate_pharmacy_bill_pdf(ctx: ClaimContext | None = None,
     for r in rows:
         cv.row(list(r), _PH_XS, "mono", 10)
     cv.rule(dashed=True)
-    cv.row(["", "", "", "", "", "Total",  str(subtotal)], _PH_XS, "mono_bold", 11)
-    cv.row(["", "", "", "", "", "GST",    str(gst)],      _PH_XS, "mono",      10)
-    cv.row(["", "", "", "", "", "Net",    str(net)],      _PH_XS, "mono_bold", 13,
+    cv.row(["", "", "", "", "", "TOTAL", str(net)], _PH_XS, "mono_bold", 13,
            color=(25, 55, 110))
     cv.gap(35)
     cv.text("Pharmacist Signature & Stamp", "sans", 10, align="right", color=(120, 120, 120))
@@ -684,7 +690,6 @@ def generate_pharmacy_bill_pdf(ctx: ClaimContext | None = None,
             "medicines_purchased": purchased,
             "total_amount": float(net),
         },
-        "extras": {"subtotal": subtotal, "gst": gst},
     }
     return pdf_bytes, gt
 

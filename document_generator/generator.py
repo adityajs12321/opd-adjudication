@@ -180,40 +180,44 @@ def generate_prescription(ctx: ClaimContext | None = None,
 def generate_medical_bill(ctx: ClaimContext | None = None,
                           variations: list[str] | None = None,
                           rng: random.Random | None = None,
-                          *, edge_cases: bool = True):
+                          *, edge_cases: bool = True,
+                          line_items_override: list[tuple[str, int]] | None = None):
     rng = rng or random.Random()
     ctx = ctx or ClaimContext.random(rng)
     variations = variations if variations is not None else _pick_variations(rng, "medical_bill")
 
-    consultation = rng.choice([500, 800, 1000, 1200, 1500, 2000])
-    test_items = [(t, rng.choice([300, 450, 500, 650, 800, 1200])) for t in ctx.tests]
-    proc_items = [(ctx.procedure, rng.choice([1500, 3000, 5000, 8000]))] if ctx.procedure else []
-    medicine_charge = rng.choice([0, 250, 450, 700, 1100])
-
-    # Optional edge cases the guide asks for.
     cancelled = None
     refund = None
     is_family = False
-    if edge_cases:
-        if rng.random() < 0.12 and test_items:
-            cancelled = test_items.pop()                      # cancelled item
-        if rng.random() < 0.08:
-            refund = ("Refund - duplicate charge", -rng.choice([200, 500]))
-        if rng.random() < 0.1:
-            is_family = True
-            ctx.family_members = [ctx.patient_name, rng.choice(data.PATIENT_NAMES)]
 
-    line_items: list[tuple[str, int]] = [("Consultation Fee", consultation)]
-    line_items += [(f"  {t}", amt) for t, amt in test_items]
-    line_items += [(f"  {p}", amt) for p, amt in proc_items]
-    if medicine_charge:
-        line_items.append(("Medicines", medicine_charge))
-    if refund:
-        line_items.append(refund)
+    if line_items_override is not None:
+        line_items: list[tuple[str, int]] = list(line_items_override)
+        subtotal = sum(amt for _, amt in line_items)
+    else:
+        consultation = rng.choice([500, 800, 1000, 1200, 1500, 2000])
+        test_items = [(t, rng.choice([300, 450, 500, 650, 800, 1200])) for t in ctx.tests]
+        proc_items = [(ctx.procedure, rng.choice([1500, 3000, 5000, 8000]))] if ctx.procedure else []
+        medicine_charge = rng.choice([0, 250, 450, 700, 1100])
 
-    subtotal = sum(amt for _, amt in line_items)
-    gst = round(subtotal * 0.18)
-    total = subtotal + gst
+        if edge_cases:
+            if rng.random() < 0.12 and test_items:
+                cancelled = test_items.pop()
+            if rng.random() < 0.08:
+                refund = ("Refund - duplicate charge", -rng.choice([200, 500]))
+            if rng.random() < 0.1:
+                is_family = True
+                ctx.family_members = [ctx.patient_name, rng.choice(data.PATIENT_NAMES)]
+
+        line_items = [("Consultation Fee", consultation)]
+        line_items += [(f"  {t}", amt) for t, amt in test_items]
+        line_items += [(f"  {p}", amt) for p, amt in proc_items]
+        if medicine_charge:
+            line_items.append(("Medicines", medicine_charge))
+        if refund:
+            line_items.append(refund)
+        subtotal = sum(amt for _, amt in line_items)
+
+    total = subtotal
     bill_no = data.bill_number(rng, "BILL")
     pay_mode = rng.choice(data.PAYMENT_MODES)
 
@@ -251,8 +255,6 @@ def generate_medical_bill(ctx: ClaimContext | None = None,
         yline = c.y - 18
         c.draw.line([(c.margin, yline), (c.margin + 760, yline)], fill=(150, 30, 30), width=2)
     c.rule(dashed=True)
-    c.row(["Sub Total", f"{subtotal:,}"], [0, 640], font("mono_bold", 18))
-    c.row(["GST (18%)", f"{gst:,}"], [0, 640], mono)
     c.row(["TOTAL", f"{total:,}"], [0, 640], font("mono_bold", 20), color=(25, 55, 110))
     c.gap(4)
     c.text(f"Amount in Words: {data.amount_in_words(total)}", font("sans", 15),
@@ -272,6 +274,14 @@ def generate_medical_bill(ctx: ClaimContext | None = None,
     c.text("Authorized Signatory & Stamp", font("sans", 15), align="right", color=(120, 120, 120))
 
     img = _apply_post(c.finish(), variations, rng, ctx, "medical_bill")
+    if line_items_override is not None:
+        consult_fee = float(next((a for l, a in line_items if "Consultation" in l), 0))
+        proc_charges = 0.0
+        other_charges = float(sum(a for l, a in line_items if "Consultation" not in l and a > 0))
+    else:
+        consult_fee = float(consultation)
+        proc_charges = float(sum(a for _, a in proc_items))
+        other_charges = float(sum(a for _, a in test_items) + medicine_charge)
     gt = {
         "doc_type": "medical_bill",
         "variations": variations,
@@ -280,15 +290,14 @@ def generate_medical_bill(ctx: ClaimContext | None = None,
             "bill_number": bill_no,
             "bill_date": ctx.consultation_date,
             "patient_name": ctx.patient_name,
-            "consultation_fee": float(consultation),
-            "procedure_charges": float(sum(a for _, a in proc_items)),
-            "other_charges": float(sum(a for _, a in test_items) + medicine_charge),
+            "consultation_fee": consult_fee,
+            "procedure_charges": proc_charges,
+            "other_charges": other_charges,
             "total_amount": float(total),
             "line_items": [f"{lbl.strip()}: ₹{amt}" for lbl, amt in line_items],
             "payment_mode": pay_mode,
         },
         "extras": {
-            "subtotal": subtotal, "gst": gst,
             "cancelled_item": cancelled[0] if cancelled else None,
             "refund": refund[1] if refund else None,
             "family_members": ctx.family_members or None,
@@ -414,9 +423,7 @@ def generate_pharmacy_bill(ctx: ClaimContext | None = None,
         rows.append((str(i), med, batch, exp, str(qty), str(mrp), f"{amt}"))
         purchased.append(f"{med} x{qty} - ₹{amt}")
 
-    subtotal = sum(int(r[6]) for r in rows)
-    gst = round(subtotal * 0.12)            # most medicines fall in 12% GST slab
-    net = subtotal + gst
+    net = sum(int(r[6]) for r in rows)
 
     c = Canvas(width=1050)
     c.text(pharmacy, font("sans_bold", 32), align="center", color=(30, 90, 30))
@@ -439,9 +446,7 @@ def generate_pharmacy_bill(ctx: ClaimContext | None = None,
     for r in rows:
         c.row(list(r), xs, mono)
     c.rule(dashed=True)
-    c.row(["", "", "", "", "", "Total", f"{subtotal}"], xs, font("mono_bold", 16))
-    c.row(["", "", "", "", "", "GST", f"{gst}"], xs, mono)
-    c.row(["", "", "", "", "", "Net", f"{net}"], xs, font("mono_bold", 18),
+    c.row(["", "", "", "", "", "TOTAL", f"{net}"], xs, font("mono_bold", 18),
           color=(25, 55, 110))
     c.gap(40)
     c.text("Pharmacist Signature & Stamp", font("sans", 15), align="right", color=(120, 120, 120))
@@ -459,12 +464,68 @@ def generate_pharmacy_bill(ctx: ClaimContext | None = None,
             "medicines_purchased": purchased,
             "total_amount": float(net),
         },
-        "extras": {"subtotal": subtotal, "gst": gst},
     }
     return img, gt
 
 
 # ── High-level helpers ───────────────────────────────────────────────────────
+
+
+def _bill_items_from_tc(bill: dict, ctx: ClaimContext) -> list[tuple[str, int]]:
+    """Convert a test-case bill dict into (label, amount) line items."""
+    items: list[tuple[str, int]] = []
+    if "consultation_fee" in bill:
+        items.append(("Consultation Fee", int(bill["consultation_fee"])))
+    if "diagnostic_tests" in bill:
+        total = int(bill["diagnostic_tests"])
+        names = bill.get("test_names", [])
+        if names:
+            base, rem = divmod(total, len(names))
+            for j, name in enumerate(names):
+                items.append((f"  {name}", base + (rem if j == 0 else 0)))
+        else:
+            items.append(("Diagnostic Tests", total))
+    if "medicines" in bill:
+        items.append(("Medicines", int(bill["medicines"])))
+    if "root_canal" in bill:
+        items.append(("Root canal treatment", int(bill["root_canal"])))
+    if "teeth_whitening" in bill:
+        items.append(("Teeth whitening (Cosmetic)", int(bill["teeth_whitening"])))
+    if "therapy_charges" in bill:
+        label = ctx.procedure or "Therapy"
+        items.append((label, int(bill["therapy_charges"])))
+    if "mri_scan" in bill:
+        items.append(("MRI Lumbar Spine", int(bill["mri_scan"])))
+    if "diet_plan" in bill:
+        items.append(("Diet plan & Bariatric consultation", int(bill["diet_plan"])))
+    _handled = {
+        "consultation_fee", "diagnostic_tests", "test_names", "medicines",
+        "root_canal", "teeth_whitening", "therapy_charges", "mri_scan", "diet_plan",
+    }
+    for k, v in bill.items():
+        if k not in _handled and isinstance(v, (int, float)):
+            items.append((k.replace("_", " ").title(), int(v)))
+    return items
+
+
+def _generate_pair(png_fn, pdf_fn, ctx: ClaimContext, rng: random.Random,
+                   fmt: str) -> tuple:
+    """Generate PNG and/or PDF, resetting rng so both receive identical draws."""
+    img = pdf_bytes = gt = None
+    if fmt in ("png", "both"):
+        pre_state = rng.getstate()
+        img, gt = png_fn(ctx=ctx, rng=rng)
+        post_png_state = rng.getstate()
+    if fmt in ("pdf", "both"):
+        if fmt == "both":
+            rng.setstate(pre_state)
+        pdf_bytes, gt_pdf = pdf_fn(ctx=ctx, rng=rng)
+        if fmt == "pdf":
+            gt = gt_pdf
+        if fmt == "both":
+            rng.setstate(post_png_state)
+    return img, pdf_bytes, gt
+
 
 _GENERATORS = {
     "prescription": generate_prescription,
@@ -542,6 +603,71 @@ def generate_claim_set(out_dir: str | Path = "generated_documents/claim",
     for doc_type in _GENERATORS:
         img, pdf_bytes, gt = _generate_one(doc_type, ctx, rng, fmt)
         manifest["documents"].append(_save(img, pdf_bytes, gt, out_dir, doc_type))
+    (out_dir / "manifest.json").write_text(json.dumps(manifest, indent=2, ensure_ascii=False))
+    return manifest
+
+
+def generate_test_cases(out_dir: str | Path = "generated_documents/test_cases",
+                        base_seed: int = 42, fmt: str = "png",
+                        case_ids: list[str] | None = None) -> dict:
+    """Generate prescription + medical bill for cases in test_cases.json.
+
+    Each case gets its own subdirectory (tc001/, tc002/, …) containing the
+    generated documents and a per-case manifest.  A top-level manifest.json
+    lists all cases with their expected adjudication decision.
+
+    ``fmt`` is ``"png"`` (default), ``"pdf"``, or ``"both"``.
+    ``case_ids`` restricts generation to specific case ids (e.g. ["TC002"]);
+    None generates all of them.  Matching is case-insensitive.
+    TC004 has no prescription in the source data — only a bill is generated.
+    """
+    assert fmt in ("png", "pdf", "both"), f"fmt must be png/pdf/both, got {fmt!r}"
+    from functools import partial
+
+    tc_path = Path(__file__).parent.parent / "test_cases.json"
+    test_cases = json.loads(tc_path.read_text())["test_cases"]
+    out_dir = Path(out_dir)
+    manifest: dict = {"format": fmt, "test_cases": []}
+
+    wanted = {c.lower() for c in case_ids} if case_ids else None
+
+    for i, tc in enumerate(test_cases):
+        if wanted is not None and tc["case_id"].lower() not in wanted:
+            continue
+        case_id = tc["case_id"]
+        inp = tc["input_data"]
+        docs_data = inp.get("documents", {})
+        rng = random.Random(base_seed + i)
+        ctx = ClaimContext.from_test_case(tc, rng)
+        case_out = out_dir / case_id.lower()
+        case_docs: dict = {}
+
+        if "prescription" in docs_data:
+            img, pdf_b, gt = _generate_pair(
+                generate_prescription,
+                _get_pdf_generators()["prescription"],
+                ctx, rng, fmt,
+            )
+            case_docs["prescription"] = _save(img, pdf_b, gt, case_out, "prescription")
+
+        if "bill" in docs_data:
+            li = _bill_items_from_tc(docs_data["bill"], ctx)
+            img, pdf_b, gt = _generate_pair(
+                partial(generate_medical_bill, edge_cases=False,
+                        line_items_override=li or None),
+                partial(_get_pdf_generators()["medical_bill"], edge_cases=False,
+                        line_items_override=li or None),
+                ctx, rng, fmt,
+            )
+            case_docs["medical_bill"] = _save(img, pdf_b, gt, case_out, "medical_bill")
+
+        manifest["test_cases"].append({
+            "case_id": case_id,
+            "case_name": tc["case_name"],
+            "expected_decision": tc["expected_output"]["decision"],
+            "documents": case_docs,
+        })
+
     (out_dir / "manifest.json").write_text(json.dumps(manifest, indent=2, ensure_ascii=False))
     return manifest
 
