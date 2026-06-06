@@ -30,7 +30,7 @@
   estimates `excluded_amount`; the final number is computed deterministically from
   `max_approvable` and that excluded amount.
 - **Copay applies to the consultation fee only** (10%), per the consultation sub-limit. The
-  network discount is recorded in the analysis but **not currently subtracted** from the amount.
+  network discount is recorded in the analysis but **not currently subtracted** from the amount to be consistent with the test cases.
 - **For partial claims, the excluded value is an LLM estimate** read from the bill's line items.
   If per-item costs are not itemized, the estimate is approximate — but the result can only go
   *down* from `max_approvable`, never above it.
@@ -59,13 +59,6 @@
 - **MRI and CT scans require pre-authorization.** Detected deterministically by keyword; since the
   system has no record of whether pre-auth was actually obtained, it **assumes pre-auth was not
   obtained** and rejects with `PRE_AUTH_MISSING`.
-
-## Fraud
-
-- The fraud agent only sees the current claim's documents and amounts. Cross-claim signals that
-  require external context — e.g. **"multiple claims same day"** — are **not detected**, because
-  that count is not captured or passed into the pipeline. Same-bill/same-date duplicates *are*
-  caught deterministically via the Postgres duplicate check.
 
 ## LLM / infrastructure
 
