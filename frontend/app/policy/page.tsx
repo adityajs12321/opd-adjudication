@@ -93,7 +93,6 @@ export default function PolicyPage() {
         </div>
         <p className="text-sm text-gray-500 mt-1">
           View and edit policy <span className="font-medium text-gray-700">PLUM_OPD_2024</span>.
-          Saving rebuilds the Neo4j policy graph and the adjudication rule engine.
         </p>
       </div>
 

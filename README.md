@@ -22,8 +22,8 @@ Documentation is in the [Docs](https://github.com/adityajs12321/opd-adjudication
   parallel and a Synthesis node merges their findings with the rule-engine output.
 - **Deterministic amounts** — the LLM decides the verdict; the approved rupee figure is computed
   in code and can never exceed `max_approvable` or the actual billed total.
-- **Policy-aware retrieval** — the policy is stored as a Neo4j graph; only the relevant slice is
-  retrieved per claim and shown in the UI.
+- **Policy-aware retrieval** — the policy lives in a Neo4j graph (the source of truth); only the
+  relevant slice is retrieved per claim and shown in the UI.
 - **Structured decisions** — every claim returns `APPROVED | REJECTED | PARTIAL | MANUAL_REVIEW`
   with approved amount, rejection codes, confidence score, notes, and next steps.
 
@@ -35,12 +35,22 @@ Documentation is in the [Docs](https://github.com/adityajs12321/opd-adjudication
   are excluded with it.
 
 **Members & data**
-- **Create members from the UI** — a "New Member" modal posts to `POST /members`
+- **Create members from the UI** — a "Register New Member" modal posts to `POST /members`
   (member ID, name, join date, relationship) and pre-fills the claim form on success.
 - Member eligibility and join-date driven waiting periods; claims and documents persisted in
   PostgreSQL.
 
+**Policy management**
+- **View & edit the policy from the UI** — a dedicated policy editor page (`/policy`) loads the
+  active policy via `GET /policy` and saves edits via `PUT /policy`.
+- **Neo4j is the source of truth** — the policy is seeded from `policy_terms.json` only when the
+  graph is empty; thereafter edits are persisted in Neo4j and survive restarts/redeploys.
+- **Edits apply live, no restart** — saving validates the policy, rebuilds the Neo4j graph, and
+  refreshes the rule engine's in-memory copy in one atomic step. `policy_id` is immutable.
+
 **Frontend UX**
+- **Welcome page** (`/`) with a member registration window; the claim tool lives at `/adjudicate`
+  and the policy editor at `/policy`.
 - Drag-to-click upload boxes with per-document status, collapsible extracted-data cards, a
   retrieved-policy-terms panel, and a decision banner with confidence bar and computed copay.
 
@@ -60,8 +70,9 @@ documents ─▶ extraction ─▶ rule engine ─▶ policy retrieval ─▶ mu
    date-based: per-claim / annual / sub-limits, copay, waiting periods, submission deadline,
    missing/illegible documents, duplicate claims, member eligibility, doctor-registration
    format, pre-auth flags. Produces a `max_approvable` ceiling and a suggested decision.
-3. **Policy retrieval** (`graph_store.py`) — the policy is stored once in Neo4j as a graph;
-   per claim, only the relevant policy nodes are retrieved and passed to the agents.
+3. **Policy retrieval** (`graph_store.py`) — the policy is stored in Neo4j as a graph (the source
+   of truth, seeded from `policy_terms.json` on first run and editable via `/policy`); per claim,
+   only the relevant policy nodes are retrieved and passed to the agents.
 4. **Multi-agent adjudication** (`adjudication_graph.py`) — a LangGraph workflow runs four
    specialist agents in parallel — **Coverage**, **Medical Necessity**, **Document Validity**,
    **Fraud** — then a **Synthesis** node merges their findings with the rule-engine output.
@@ -92,7 +103,12 @@ backend/
   models.py             # Pydantic models
   requirements.txt
 frontend/
-  app/                  # page.tsx (upload form + results), layout, globals.css
+  app/
+    page.tsx                     # Welcome page + member registration window
+    adjudicate/page.tsx          # Claim upload form + results
+    policy/page.tsx              # Policy viewer / editor
+    components/CreateMemberModal.tsx  # Shared member-registration modal
+    layout.tsx, globals.css
   lib/types.ts          # TypeScript mirrors of the Pydantic models
   package.json
 document_generator/     # Mock document generator (PNG/PDF + ground-truth JSON)
@@ -100,7 +116,7 @@ document_generator/     # Mock document generator (PNG/PDF + ground-truth JSON)
   pdf_generator.py      # Text-based PDF generators (reportlab)
   data.py               # Sample pools, ClaimContext, bill-layout templates
   README.md             # Full generator docs
-policy_terms.json       # Coverage limits, sub-limits, exclusions, network hospitals
+policy_terms.json       # Coverage limits, sub-limits, exclusions, network hospitals (seeds Neo4j)
 adjudication_rules.json # Adjudication logic + rejection codes (read by backend)
 adjudication_rules.md   # Human-readable source for the rules
 test_cases.json         # 10 canonical test scenarios
@@ -163,10 +179,14 @@ npm run dev   # http://localhost:3000
 
 ## Usage
 
-1. Open http://localhost:3000.
-2. Create a member first through a backend call (/members) (a claim must belong to a known member).
-3. Upload the claim documents and submit. The result panel shows the decision, approved amount,
-   rejection codes, confidence, and the specialist agents' reasoning.
+1. Open http://localhost:3000 — the welcome page.
+2. **Register a member** in the registration window (a claim must belong to a known member). This
+   posts to `POST /members`; on success you can jump straight to a claim.
+3. On the **claim page** (`/adjudicate`), enter the member ID, upload the claim documents, and
+   submit. The result panel shows the decision, approved amount, rejection codes, confidence, and
+   the specialist agents' reasoning.
+4. (Optional) Open the **policy editor** (`/policy`) to view or edit the active policy. Saving
+   rebuilds the Neo4j graph and rule engine live — no restart needed.
 
 ## Decision schema
 

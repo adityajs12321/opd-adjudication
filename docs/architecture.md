@@ -9,7 +9,8 @@ backed by **PostgreSQL** (claim/member state) and **Neo4j** (the policy stored a
 ```
 ┌──────────────────────────────────────────────────────────────────────────────┐
 │                              Frontend (Next.js)                              │
-│   app/page.tsx — upload form + results panel        lib/types.ts — TS models │
+│   / welcome + register   /adjudicate upload + results   /policy editor        │
+│   app/components/CreateMemberModal.tsx        lib/types.ts — TS models        │
 └───────────────────────────────────┬──────────────────────────────────────────┘
                                     │ HTTPS (multipart / JSON)
                                     ▼
@@ -17,6 +18,7 @@ backed by **PostgreSQL** (claim/member state) and **Neo4j** (the policy stored a
 │                              Backend (FastAPI · main.py)                          │
 │                                                                                   │
 │   POST /adjudicate-documents   POST /members   GET /members/{id}   GET /health    │
+│   GET/PUT /policy                                                                 │
 │                                                                                   │
 │   ┌────────────┐   ┌────────────────┐   ┌─────────────────┐   ┌────────────────┐  │
 │   │ Extraction │──▶│ Rule engine    │──▶│ Policy retrieval│──▶│ Adjudication   │  │
@@ -115,8 +117,9 @@ them with the deterministic rule-engine findings and emits the final decision.
 - **Retries with exponential backoff + jitter** on every Gemini call (extraction and agents)
   for rate limits (429) and transient 5xx errors.
 - **`temperature=0`** on extraction and adjudication calls for repeatable output.
-- **Neo4j read once at startup** into an in-memory cache; per-claim retrieval filters that cache,
-  so adjudication does no live graph round-trips.
+- **Neo4j cached in memory** — the policy graph is read into an in-memory cache on startup and
+  per-claim retrieval filters that cache, so adjudication does no live graph round-trips. A policy
+  edit (`PUT /policy`) rebuilds the graph and refreshes the cache, so no restart is needed.
 - **Deterministic guardrails** in synthesis: amount capped at `max_approvable`; hard rejections
   force `REJECTED`; a partial that nets to ₹0 collapses to `REJECTED`.
 
@@ -125,9 +128,11 @@ them with the deterministic rule-engine findings and emits the final decision.
 | Store | Holds | Notes |
 |---|---|---|
 | **Postgres** | `members`, `claims`, `claim_documents` | Annual spend, duplicate detection, audit of extracted data |
-| **Neo4j** | Policy graph (`PLUM_OPD_2024`) | Limits, coverage categories, exclusions, waiting periods, network hospitals |
+| **Neo4j** | Policy graph (`PLUM_OPD_2024`) — **source of truth** | Limits, coverage categories, exclusions, waiting periods, network hospitals; full source JSON kept on the root node's `raw_json` for lossless read-back |
 
-See `database.py` for the SQL schema and `graph_store.py` for the graph model.
+The policy graph is seeded from `policy_terms.json` only when Neo4j is empty; afterwards edits via
+`PUT /policy` persist in Neo4j and survive restarts. See `database.py` for the SQL schema and
+`graph_store.py` for the graph model.
 
 ## Deployment topology
 

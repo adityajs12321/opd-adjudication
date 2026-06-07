@@ -83,7 +83,7 @@ export default function WelcomePage() {
             <h2 className="text-lg font-semibold text-gray-900 mb-1">New here?</h2>
             <p className="text-sm text-gray-500 mb-5 max-w-md mx-auto">
               Register a member to get started. You can then submit their OPD
-              documents for adjudication.
+              documents.
             </p>
             <button
               type="button"
@@ -98,7 +98,7 @@ export default function WelcomePage() {
       </section>
 
       {/* Secondary actions */}
-      <div className="flex flex-col items-center gap-2 mb-12">
+      <div className="flex flex-col items-center gap-4 mb-12">
         <Link
           href="/adjudicate"
           className="inline-flex items-center gap-1.5 text-sm font-medium text-gray-600 hover:text-gray-900 transition-colors"
@@ -108,36 +108,12 @@ export default function WelcomePage() {
         </Link>
         <Link
           href="/policy"
-          className="inline-flex items-center gap-1.5 text-sm font-medium text-gray-500 hover:text-gray-900 transition-colors"
+          className="inline-flex items-center justify-center gap-2 px-6 py-3 bg-white border-2 border-gray-900 text-gray-900 text-sm font-semibold rounded-xl hover:bg-gray-900 hover:text-white transition-colors"
         >
           <ScrollText className="w-4 h-4" />
-          View &amp; edit policy
+          View &amp; Edit Policy
+          <ArrowRight className="w-4 h-4" />
         </Link>
-      </div>
-
-      {/* How it works */}
-      <div className="grid sm:grid-cols-3 gap-4">
-        <div className="bg-white rounded-xl border border-gray-200 p-5">
-          <UserPlus className="w-6 h-6 text-gray-700 mb-3" />
-          <h3 className="text-sm font-semibold text-gray-800 mb-1">1. Register</h3>
-          <p className="text-xs text-gray-500">
-            Add the member with their join date and relationship.
-          </p>
-        </div>
-        <div className="bg-white rounded-xl border border-gray-200 p-5">
-          <FileText className="w-6 h-6 text-gray-700 mb-3" />
-          <h3 className="text-sm font-semibold text-gray-800 mb-1">2. Upload</h3>
-          <p className="text-xs text-gray-500">
-            Submit prescriptions, bills, and reports for the claim.
-          </p>
-        </div>
-        <div className="bg-white rounded-xl border border-gray-200 p-5">
-          <Workflow className="w-6 h-6 text-gray-700 mb-3" />
-          <h3 className="text-sm font-semibold text-gray-800 mb-1">3. Adjudicate</h3>
-          <p className="text-xs text-gray-500">
-            Get an instant decision with approved amount and reasoning.
-          </p>
-        </div>
       </div>
     </main>
   );

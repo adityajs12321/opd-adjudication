@@ -3,7 +3,7 @@
 Base URL (local): `http://localhost:8000`
 
 All responses are JSON. CORS allowed origins are controlled by the `FRONTEND_URLS` env var
-(comma-separated; defaults to `http://localhost:3000`). Allowed methods: `GET`, `POST`.
+(comma-separated; defaults to `http://localhost:3000`). Allowed methods: `GET`, `POST`, `PUT`.
 
 ## Endpoints
 
@@ -13,6 +13,8 @@ All responses are JSON. CORS allowed origins are controlled by the `FRONTEND_URL
 | `POST` | `/members` | Create / upsert a member |
 | `GET`  | `/members/{member_id}` | Fetch a member |
 | `POST` | `/adjudicate-documents` | Adjudicate uploaded claim documents |
+| `GET`  | `/policy` | Fetch the active policy |
+| `PUT`  | `/policy` | Replace the active policy (validate + persist + rebuild) |
 
 ---
 
@@ -166,6 +168,76 @@ curl -X POST http://localhost:8000/adjudicate-documents \
   -F "claimed_amount=12000" \
   -F "prescription=@./prescription.jpg" \
   -F "medical_bill=@./bill.pdf"
+```
+
+---
+
+## `GET /policy`
+
+Returns the **active policy** as JSON. The policy is read from Neo4j (the source of truth),
+falling back to the in-memory copy. The shape mirrors `policy_terms.json`.
+
+**Response `200`** (abridged)
+```json
+{
+  "policy_id": "PLUM_OPD_2024",
+  "policy_name": "Plum OPD Insurance 2024",
+  "effective_date": "2024-01-01",
+  "coverage_details": {
+    "per_claim_limit": 5000,
+    "annual_limit": 50000,
+    "family_floater_limit": 200000,
+    "consultation_fees": { "covered": true, "sub_limit": 2000, "copay_percentage": 10, "network_discount": 20 },
+    "diagnostic_tests": { "sub_limit": 10000 },
+    "pharmacy": { "sub_limit": 15000 }
+  },
+  "claim_requirements": { "submission_timeline_days": 30, "minimum_claim_amount": 500 },
+  "waiting_periods": { "initial_waiting": 30, "pre_existing_diseases": 365, "maternity": 365, "specific_ailments": {} },
+  "exclusions": [],
+  "network_hospitals": []
+}
+```
+
+---
+
+## `PUT /policy`
+
+Replaces the active policy. The request body is the **full policy JSON** (same shape as
+`GET /policy`). On success the backend, in one atomic step:
+
+1. **validates** the structure,
+2. **persists** the JSON to Neo4j and **rebuilds** the policy graph + cache, and
+3. **refreshes** the rule engine's in-memory policy.
+
+Changes apply immediately — no restart needed.
+
+**Request body** (`application/json`) — the complete policy object.
+
+**Constraints**
+
+- `policy_id` is **immutable** and must remain `PLUM_OPD_2024` (it is the graph node key).
+- Required keys (validated): `policy_name`, `effective_date`, `coverage_details`
+  (`per_claim_limit`, `annual_limit`, `family_floater_limit`, `consultation_fees` with
+  `sub_limit`/`copay_percentage`/`network_discount`, `diagnostic_tests.sub_limit`,
+  `pharmacy.sub_limit`, plus `dental`/`vision`/`alternative_medicine`),
+  `claim_requirements` (`submission_timeline_days`, `minimum_claim_amount`),
+  `waiting_periods` (`initial_waiting`, `pre_existing_diseases`, `maternity`,
+  `specific_ailments`), `exclusions` (list), `network_hospitals` (list).
+
+**Response `200`** — the saved policy (same shape as `GET /policy`).
+
+**Errors**
+
+| Status | When |
+|---|---|
+| `422` | Validation failed (missing/invalid key, or `policy_id` changed); message names the problem |
+| `500` | Failed to apply the policy (e.g. graph rebuild error) |
+
+**Example**
+```bash
+curl -X PUT http://localhost:8000/policy \
+  -H "Content-Type: application/json" \
+  --data-binary @policy_terms.json
 ```
 
 ---

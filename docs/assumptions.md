@@ -67,9 +67,12 @@
   `additionalProperties`).
 - **Gemini calls retry** transient failures (429 / 5xx) with exponential backoff + jitter; a
   rate-limited extraction is retried rather than being mistaken for an illegible document.
-- **The policy graph is built once at startup** and cached in memory; adjudication does no live
-  Neo4j queries. The cache is not invalidated until the next restart, so policy edits require a
-  backend restart.
+- **Neo4j is the source of truth for the policy.** It is seeded from `policy_terms.json` only when
+  the graph is empty; thereafter the file is ignored and edits live in Neo4j (so they survive
+  restarts/redeploys). The graph is cached in memory and adjudication does no live Neo4j queries.
+- **Policy edits apply live.** Saving via `PUT /policy` (or the `/policy` editor page) validates the
+  policy, rebuilds the graph + cache, and refreshes the rule engine in one step — no restart needed.
+  `policy_id` is immutable. There is no auth on the policy endpoints in this build.
 - **Postgres and Neo4j are both required** at startup (`init_db`, `init_graph`); there is no
   in-memory fallback if either is unavailable.
 
