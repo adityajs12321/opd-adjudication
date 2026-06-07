@@ -6,6 +6,7 @@ import {
   ArrowRight,
   CheckCircle2,
   FileText,
+  ScrollText,
   ShieldCheck,
   UserPlus,
   Workflow,
@@ -96,14 +97,21 @@ export default function WelcomePage() {
         )}
       </section>
 
-      {/* Secondary action */}
-      <div className="text-center mb-12">
+      {/* Secondary actions */}
+      <div className="flex flex-col items-center gap-2 mb-12">
         <Link
           href="/adjudicate"
           className="inline-flex items-center gap-1.5 text-sm font-medium text-gray-600 hover:text-gray-900 transition-colors"
         >
           Already registered? Go to claim adjudication
           <ArrowRight className="w-4 h-4" />
+        </Link>
+        <Link
+          href="/policy"
+          className="inline-flex items-center gap-1.5 text-sm font-medium text-gray-500 hover:text-gray-900 transition-colors"
+        >
+          <ScrollText className="w-4 h-4" />
+          View &amp; edit policy
         </Link>
       </div>
 

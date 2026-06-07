@@ -5,8 +5,17 @@ from pathlib import Path
 import json
 
 ROOT = Path(__file__).parent.parent
+# Default policy loaded from disk; overridden at startup with the active policy
+# from Neo4j (the source of truth) via set_policy().
 _policy = (ROOT / "policy_terms.json").read_text()
 _policy_data: dict = json.loads(_policy)
+
+
+def set_policy(policy_data: dict):
+    """Replace the in-memory policy used for deterministic rule checks."""
+    global _policy_data
+    _policy_data = policy_data
+
 
 _DOCTOR_REG_RE = re.compile(r"^[A-Z]{2,3}/\d+/\d{4}$")
 

@@ -23,6 +23,7 @@ from models import (
     MemberCreate,
     MemberRecord,
 )
+import rule_engine
 from rule_engine import run_rule_engine
 from document_extractor import extract_document, agent_config
 from adjudication_graph import run_adjudication
@@ -41,21 +42,94 @@ _frontend_origins = [
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_frontend_origins,
-    allow_methods=["POST", "GET"],
+    allow_methods=["POST", "GET", "PUT"],
     allow_headers=["Content-Type"],
 )
 
 client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
 
 ROOT = Path(__file__).parent.parent
-_policy = (ROOT / "policy_terms.json").read_text()
-_policy_data: dict = json.loads(_policy)
+
+# The active policy. Neo4j is the source of truth; the file is only a seed for a
+# fresh database. Kept in sync across the graph (graph_store) and the
+# deterministic checks (rule_engine) via apply_policy().
+_policy_data: dict = {}
+
+
+# Policy validation — the structural keys the graph builder and rule engine
+# depend on. Editing the policy through the API must not break either.
+def _validate_policy(data: dict) -> None:
+    """Raise ValueError if `data` is missing keys the backend relies on."""
+    if not isinstance(data, dict):
+        raise ValueError("Policy must be a JSON object.")
+
+    # policy_id is the graph node key (graph_store.POLICY_ID) and cannot change.
+    if data.get("policy_id") != graph_store.POLICY_ID:
+        raise ValueError(f"policy_id must remain '{graph_store.POLICY_ID}'.")
+
+    def require(container: dict, keys: list[str], where: str):
+        missing = [k for k in keys if k not in container]
+        if missing:
+            raise ValueError(f"Missing key(s) in {where}: {', '.join(missing)}.")
+
+    require(
+        data,
+        ["policy_name", "effective_date", "coverage_details",
+         "claim_requirements", "waiting_periods", "exclusions", "network_hospitals"],
+        "policy",
+    )
+    if not isinstance(data["exclusions"], list):
+        raise ValueError("exclusions must be a list.")
+    if not isinstance(data["network_hospitals"], list):
+        raise ValueError("network_hospitals must be a list.")
+
+    cov = data["coverage_details"]
+    require(
+        cov,
+        ["per_claim_limit", "annual_limit", "family_floater_limit",
+         "consultation_fees", "diagnostic_tests", "pharmacy",
+         "dental", "vision", "alternative_medicine"],
+        "coverage_details",
+    )
+    require(cov["consultation_fees"], ["sub_limit", "copay_percentage", "network_discount"], "coverage_details.consultation_fees")
+    require(cov["diagnostic_tests"], ["sub_limit"], "coverage_details.diagnostic_tests")
+    require(cov["pharmacy"], ["sub_limit"], "coverage_details.pharmacy")
+
+    require(data["claim_requirements"], ["submission_timeline_days", "minimum_claim_amount"], "claim_requirements")
+
+    wp = data["waiting_periods"]
+    require(wp, ["initial_waiting", "pre_existing_diseases", "maternity", "specific_ailments"], "waiting_periods")
+    if not isinstance(wp["specific_ailments"], dict):
+        raise ValueError("waiting_periods.specific_ailments must be an object.")
+
+
+def apply_policy(data: dict, *, persist: bool = True) -> None:
+    """Make `data` the active policy across the graph and rule engine.
+
+    With persist=True the Neo4j graph is wiped and rebuilt (and the raw JSON
+    stored on the root node); the in-memory cache is warmed either way.
+    """
+    global _policy_data
+    _validate_policy(data)
+    if persist:
+        graph_store.init_graph(data)
+    else:
+        graph_store.load_cache()
+    rule_engine.set_policy(data)
+    _policy_data = data
 
 
 @app.on_event("startup")
 def startup():
     db.init_db()
-    graph_store.init_graph(_policy_data)
+    # Neo4j is the source of truth. Seed it from the file only if empty so that
+    # edits made through the API survive restarts and redeploys.
+    existing = graph_store.get_raw_policy()
+    if existing is None:
+        seed = json.loads((ROOT / "policy_terms.json").read_text())
+        apply_policy(seed, persist=True)
+    else:
+        apply_policy(existing, persist=False)
 
 
 # Endpoints
@@ -63,6 +137,24 @@ def startup():
 @app.get("/health")
 def health():
     return {"status": "ok"}
+
+
+@app.get("/policy")
+def get_policy():
+    """Return the active policy (read from Neo4j, falling back to in-memory)."""
+    return graph_store.get_raw_policy() or _policy_data
+
+
+@app.put("/policy")
+def update_policy(payload: dict):
+    """Validate, persist to Neo4j, and rebuild the graph + rule-engine state."""
+    try:
+        apply_policy(payload, persist=True)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(500, f"Failed to apply policy: {exc}") from exc
+    return _policy_data
 
 
 @app.post("/members", response_model=MemberRecord)

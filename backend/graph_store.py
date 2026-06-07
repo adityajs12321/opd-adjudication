@@ -1,3 +1,4 @@
+import json
 import os
 from neo4j import GraphDatabase
 from models import ExtractionResults
@@ -28,6 +29,28 @@ def init_graph(policy_data: dict):
     _cache = _load_cache()
 
 
+def load_cache():
+    """Warm the in-memory cache from the existing graph without rebuilding it.
+
+    Used on startup when Neo4j already holds a policy (the source of truth) and
+    we just need this process's cache populated.
+    """
+    global _cache
+    _cache = _load_cache()
+
+
+def get_raw_policy() -> dict | None:
+    """Return the full policy JSON stored on the root node, or None if unseeded."""
+    with _get_driver().session() as session:
+        row = session.run(
+            "MATCH (p:Policy {id: $pid}) RETURN p.raw_json AS raw",
+            pid=POLICY_ID,
+        ).single()
+    if not row or not row["raw"]:
+        return None
+    return json.loads(row["raw"])
+
+
 def _build_graph(tx, policy: dict):
     pid = policy["policy_id"]
     cov = policy["coverage_details"]
@@ -35,14 +58,17 @@ def _build_graph(tx, policy: dict):
     # Wipe previous graph (all nodes carry the PlumPolicyNode marker label)
     tx.run("MATCH (n:PlumPolicyNode) DETACH DELETE n")
 
-    # Root policy
+    # Root policy. The full source JSON is stashed on `raw_json` so the policy
+    # can be read back losslessly for editing — the rest of the graph is a
+    # queryable projection of it, not the source of truth.
     tx.run(
         """
-        CREATE (:Policy:PlumPolicyNode {id: $id, name: $name, effective_date: $eff})
+        CREATE (:Policy:PlumPolicyNode {id: $id, name: $name, effective_date: $eff, raw_json: $raw})
         """,
         id=pid,
         name=policy["policy_name"],
         eff=policy["effective_date"],
+        raw=json.dumps(policy),
     )
 
     # Global Limits
