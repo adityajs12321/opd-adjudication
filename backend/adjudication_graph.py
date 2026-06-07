@@ -111,16 +111,6 @@ Guidelines:
   its consultation fee, related tests, and related medicines are ALSO excluded — mark them
   "excluded" too, with a reason that ties them back to the excluded treatment.
 
-Category cues (map the treatment to the right policy bucket before deciding):
-- Dental: fillings, extractions, root canal, cleaning are COVERED. Teeth whitening / veneers and
-  other cosmetic dentistry are EXCLUDED (cosmetic procedures).
-- Alternative medicine: Ayurveda, Homeopathy, Unani are COVERED — this includes Ayurvedic therapies
-  like Panchakarma. Other non-allopathic systems (e.g. Naturopathy, Siddha) are EXCLUDED.
-- Vision: eye tests, glasses, contact lenses are COVERED; LASIK is EXCLUDED.
-- EXCLUDED regardless of diagnosis: cosmetic procedures; weight-loss / bariatric treatment & diet
-  plans; infertility treatment; experimental treatments; self-inflicted or adventure-sport injuries;
-  HIV/AIDS; alcohol/drug-abuse treatment; vitamins/supplements unless prescribed for a deficiency.
-
 Return JSON:
 {
   "findings": [{"item": "treatment/service/category", "status": "covered|excluded|uncertain", "reason": "short justification"}],

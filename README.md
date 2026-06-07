@@ -91,7 +91,6 @@ backend/
   database.py           # Postgres access (members, claims, documents)
   models.py             # Pydantic models
   requirements.txt
-  .env.example
 frontend/
   app/                  # page.tsx (upload form + results), layout, globals.css
   lib/types.ts          # TypeScript mirrors of the Pydantic models
