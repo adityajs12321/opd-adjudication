@@ -8,6 +8,8 @@ approved amount, rejection codes, confidence score, and step-by-step reasoning.
 
 Documentation is in the [Docs](https://github.com/adityajs12321/opd-adjudication/tree/main/docs) folder
 
+Backend is hosted on Render, so it will take a few seconds to wake up if not accessed recently.
+
 ## Features
 
 **Adjudication**
