@@ -70,8 +70,7 @@ documents ─▶ extraction ─▶ rule engine ─▶ policy retrieval ─▶ mu
    date-based: per-claim / annual / sub-limits, copay, waiting periods, submission deadline,
    missing/illegible documents, duplicate claims, member eligibility, doctor-registration
    format, pre-auth flags. Produces a `max_approvable` ceiling and a suggested decision.
-3. **Policy retrieval** (`graph_store.py`) — the policy is stored in Neo4j as a graph (the source
-   of truth, seeded from `policy_terms.json` on first run and editable via `/policy`); per claim,
+3. **Policy retrieval** (`graph_store.py`) — the policy is stored in Neo4j as a graph (seeded from `policy_terms.json` on first run and editable via `/policy`); per claim,
    only the relevant policy nodes are retrieved and passed to the agents.
 4. **Multi-agent adjudication** (`adjudication_graph.py`) — a LangGraph workflow runs four
    specialist agents in parallel — **Coverage**, **Medical Necessity**, **Document Validity**,
@@ -118,8 +117,7 @@ document_generator/     # Mock document generator (PNG/PDF + ground-truth JSON)
   README.md             # Full generator docs
 policy_terms.json       # Coverage limits, sub-limits, exclusions, network hospitals (seeds Neo4j)
 adjudication_rules.json # Adjudication logic + rejection codes (read by backend)
-adjudication_rules.md   # Human-readable source for the rules
-test_cases.json         # 10 canonical test scenarios
+test_cases.json         # 10 test scenarios
 render.yaml             # Render Blueprint for backend deploy
 ```
 
