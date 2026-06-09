@@ -132,6 +132,28 @@ render.yaml             # Render Blueprint for backend deploy
 
 ## Setup
 
+### 0. Neo4j (via Docker)
+
+If you don't already have Neo4j running, the quickest way is Docker. This starts a local instance
+with the credentials the backend expects:
+
+```bash
+docker run -d \
+  --name plum-neo4j \
+  -p 7474:7474 -p 7687:7687 \
+  -e NEO4J_AUTH=neo4j/your_neo4j_password \
+  neo4j:5
+```
+
+- `7687` is the Bolt port the backend connects to (`NEO4J_URI=bolt://localhost:7687`).
+- `7474` is the Neo4j Browser UI — open http://localhost:7474 to inspect the policy graph.
+- Set `NEO4J_AUTH=neo4j/<password>` to whatever you put in `backend/.env` as `NEO4J_PASSWORD`
+  (the username must be `neo4j`).
+
+Manage the container with `docker stop plum-neo4j` / `docker start plum-neo4j`. To wipe it and
+start fresh, `docker rm -f plum-neo4j` and re-run the command above. The policy graph is
+(re)built automatically by the backend on startup.
+
 ### 1. Backend
 
 ```bash
