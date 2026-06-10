@@ -12,7 +12,7 @@ _pool: pool.SimpleConnectionPool | None = None
 def get_pool() -> pool.SimpleConnectionPool:
     global _pool
     if _pool is None:
-        _pool = pool.SimpleConnectionPool(1, 10, dsn=os.environ["DATABASE_URL"])
+        _pool = pool.SimpleConnectionPool(1, 10, dsn=os.environ["DATABASE_URL"],sslmode=os.getenv("DB_SSLMODE", "require"))
     return _pool
 
 
