@@ -117,6 +117,8 @@ document_generator/     # Mock document generator (PNG/PDF + ground-truth JSON)
   pdf_generator.py      # Text-based PDF generators (reportlab)
   data.py               # Sample pools, ClaimContext, bill-layout templates
   README.md             # Full generator docs
+evaluation/
+  accuracy_testing.py   # Scores the pipeline against test_cases.json (decision + rejection-code accuracy)
 policy_terms.json       # Coverage limits, sub-limits, exclusions, network hospitals (seeds Neo4j)
 adjudication_rules.json # Adjudication logic + rejection codes (read by backend)
 test_cases.json         # 10 test scenarios
@@ -221,10 +223,38 @@ Every adjudication returns:
 - `confidence_score` — 0.0–1.0
 - `notes`, `next_steps`
 
-## Testing
+## Testing & evaluation
 
 `test_cases.json` contains 10 canonical scenarios (approvals, partial approvals, limit/waiting-period
 rejections, excluded treatments, pre-auth, fraud review) used to verify adjudication behavior.
+
+`evaluation/accuracy_testing.py` scores the pipeline end-to-end: it posts each test case's documents
+to the running `/adjudicate-documents` endpoint and compares the result against the expected output,
+reporting two metrics:
+
+- **Decision accuracy** — how many claims produced the expected decision (`APPROVED` /
+  `REJECTED` / `PARTIAL` / `MANUAL_REVIEW`).
+- **Rejection-code accuracy** — for rejected claims, how many of the expected rejection codes the
+  pipeline returned.
+
+The script reads the mock documents from `generated_documents/test_cases/<case_id>/`, so generate
+them first with the document generator (`--mode testcases`).
+
+```bash
+# 1. Backend must be running (uvicorn) with Postgres + Neo4j up
+# 2. Generate the test-case documents (see document_generator/README.md)
+cd evaluation
+python accuracy_testing.py
+```
+
+Output:
+
+```
+Accuracy: 6/10
+Rejection Codes Accuracy: 4/5
+```
+
+The accuracy is low because some of the test cases are inconsistent, and the assumptions held by the current model contradict that. For example, TC001 should be a complete approval, but the medical bill contains vitamin supplements which are explicitly excluded in the policy, so the system rejects those line items and returns a `PARTIAL` approval instead of `APPROVED`. The actual amount approved is consistent with the policy and reasoning is accurate.
 
 ## Document generator
 
